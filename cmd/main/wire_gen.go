@@ -7,27 +7,27 @@
 package main
 
 import (
+	"gin-template/conf"
 	"gin-template/internal"
 	"gin-template/internal/domain"
 	"gin-template/internal/domain/demo"
 	"gin-template/internal/router"
 	"gin-template/pkg/infra"
-	"github.com/spf13/viper"
 	"log/slog"
 )
 
 // Injectors from wire.go:
 
-func initApp(vc *viper.Viper, logger *slog.Logger) *internal.MainApp {
-	client := infra.NewRedisClient(vc)
+func initApp(cfg *conf.Config, logger *slog.Logger) *internal.MainApp {
+	client := infra.NewRedisClient(cfg)
 	redisClient := infra.NewCustomRedisClient(client)
-	data := infra.NewData(vc, redisClient)
+	data := infra.NewData(cfg, redisClient)
 	demoRepo := demo.NewDemoRepo(data)
 	demoBiz := demo.NewDemoBiz(logger, demoRepo)
 	demoService := demo.NewDemoService(demoBiz, logger)
 	serviceHub := domain.NewServiceHub(demoService)
 	registerFunc := router.NewRegisterFunc()
 	registeredMiddleWire := router.NewRegisterMiddleWire()
-	mainApp := internal.NewMainApp(vc, serviceHub, registerFunc, registeredMiddleWire, data)
+	mainApp := internal.NewMainApp(cfg, serviceHub, registerFunc, registeredMiddleWire, data)
 	return mainApp
 }

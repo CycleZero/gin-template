@@ -1,32 +1,30 @@
 package internal
 
 import (
-	"gin-template/pkg/infra"
 	"log/slog"
 	"net/http"
-	"strconv"
 
+	"gin-template/conf"
 	"gin-template/internal/domain"
 	"gin-template/internal/router"
+	"gin-template/pkg/infra"
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/spf13/viper"
 )
 
 // MainApp 应用主结构，封装 Gin Engine 和所有基础设施
 type MainApp struct {
 	Engine       *gin.Engine
 	ServiceHub   *domain.ServiceHub
-	port         uint
-	host         string
+	addr         string
 	data         *infra.Data
 	RegisterFunc router.RegisterFunc
 }
 
 // NewMainApp 创建主应用实例（由 Wire 注入）
 func NewMainApp(
-	vc *viper.Viper,
+	cfg *conf.Config,
 	hub *domain.ServiceHub,
 	registerFunc router.RegisterFunc,
 	registeredMiddleWire router.RegisteredMiddleWire,
@@ -54,8 +52,7 @@ func NewMainApp(
 
 	app := &MainApp{
 		Engine:       e,
-		port:         vc.GetUint("server.http.port"),
-		host:         vc.GetString("server.http.host"),
+		addr:         cfg.Server.HTTP.Addr(),
 		ServiceHub:   hub,
 		RegisterFunc: registerFunc,
 	}
@@ -74,9 +71,8 @@ func (a *MainApp) printRoutes() {
 
 // StartServer 启动 HTTP 服务
 func (a *MainApp) StartServer() error {
-	addr := a.host + ":" + strconv.FormatUint(uint64(a.port), 10)
-	slog.Info("启动服务", "addr", addr)
-	return a.Engine.Run(addr)
+	slog.Info("启动服务", "addr", a.addr)
+	return a.Engine.Run(a.addr)
 }
 
 // Close 关闭应用，释放资源

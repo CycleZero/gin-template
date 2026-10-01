@@ -1,24 +1,32 @@
 package main
 
 import (
-	"gin-template/conf"
-	"gin-template/pkg/log"
+	"flag"
 	"os"
 	"os/signal"
+
+	"gin-template/conf"
+	"gin-template/pkg/log"
 )
 
 func main() {
-	vc := conf.GetConfig()
+	confPath := flag.String("conf", conf.DefaultPath, "配置文件路径（文件或目录）")
+	flag.Parse()
+
+	cfg := conf.GetConfig(*confPath)
 	logger := log.GetLogger()
 
-	// 进程退出（含 panic）前刷新异步日志文件写入器，避免丢失缓冲日志
+	// 进程退出（含 panic）前刷新异步日志、释放配置 source watcher
 	defer func() {
 		if err := log.Close(); err != nil {
 			logger.Error("关闭日志失败", "error", err)
 		}
+		if err := conf.Close(); err != nil {
+			logger.Error("关闭配置失败", "error", err)
+		}
 	}()
 
-	app := initApp(vc, logger)
+	app := initApp(cfg, logger)
 
 	done := make(chan os.Signal, 1)
 	go func() {

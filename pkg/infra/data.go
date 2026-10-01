@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"time"
 
+	"gin-template/conf"
 	"gin-template/pkg/log"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -41,15 +41,8 @@ func (r *RedisClient) PutObject(ctx context.Context, key string, target any, exp
 	return r.SetEx(ctx, key, string(str), expiration).Err()
 }
 
-func NewData(vc *viper.Viper, rdb *RedisClient) *Data {
-	host := vc.GetString("data.db.host")
-	port := vc.GetString("data.db.port")
-	user := vc.GetString("data.db.user")
-	password := vc.GetString("data.db.password")
-	dbname := vc.GetString("data.db.db_name")
-	dsn := getDsn(host, port, user, password, dbname)
-
-	masterDB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
+func NewData(cfg *conf.Config, rdb *RedisClient) *Data {
+	masterDB, err := gorm.Open(mysql.Open(cfg.Data.DB.DSN()), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   logger.Default.LogMode(logger.Info),
 	})
@@ -63,17 +56,10 @@ func NewData(vc *viper.Viper, rdb *RedisClient) *Data {
 	}
 }
 
-func getDsn(host, port, user, password, dbname string) string {
-	return user + ":" + password + "@tcp(" + host + ":" + port + ")/" + dbname + "?charset=utf8mb4&parseTime=True&loc=Local"
-}
-
-func NewRedisClient(vc *viper.Viper) *redis.Client {
-	host := vc.GetString("data.redis.host")
-	port := vc.GetString("data.redis.port")
-	password := vc.GetString("data.redis.password")
+func NewRedisClient(cfg *conf.Config) *redis.Client {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     host + ":" + port,
-		Password: password,
+		Addr:     cfg.Data.Redis.Addr(),
+		Password: cfg.Data.Redis.Password,
 		DB:       0,
 	})
 	return rdb

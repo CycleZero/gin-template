@@ -8,7 +8,7 @@
 |------|------|
 | [Gin](https://github.com/gin-gonic/gin) | HTTP Web 框架 |
 | [Wire](https://github.com/google/wire) | 依赖注入代码生成 |
-| [Viper](https://github.com/spf13/viper) | 配置管理 |
+| [Kratos config](https://go-kratos.dev/docs/component/config/) | 配置加载（file + env source，可扩展 etcd 等） |
 | [log/slog](https://pkg.go.dev/log/slog) | 结构化日志门面（业务代码统一入口） |
 | [Zap](https://github.com/uber-go/zap) | 日志后端，经 zapslog 桥接到 slog |
 | [GORM](https://gorm.io) | ORM 框架 (MySQL) |
@@ -27,7 +27,7 @@ gin-template/
 ├── config.yaml.example         # 配置文件示例
 │
 ├── conf/                       # 配置模块
-│   └── viper.go                # Viper 配置加载
+│   └── config.go               # Kratos config 加载（file + env source）+ 强类型 Config
 │
 ├── pkg/                        # 可复用基础设施
 │   ├── log/                    # 日志模块
@@ -145,36 +145,65 @@ make run
 
 ## 配置说明
 
+配置由 [Kratos v3 的 config 组件](https://go-kratos.dev/docs/component/config/) 加载，
+按 source 顺序覆盖（**后面的覆盖前面的**）：
+
+1. **file source**：`config.yaml`（默认值，随版本库管理）
+2. **env source**：`APP_` 前缀环境变量（部署覆盖）
+
+配置文件里的 `${KEY:default}` 占位符会从「合并后的配置」解析，因此嵌套项也能被
+环境变量覆盖，密钥无需写进文件：
+
+```bash
+APP_DB_HOST=10.0.0.12 APP_DB_PORT=3400 APP_DB_PASSWORD=secret ./app
+```
+
+配置模型是强类型结构体 [conf/config.go](conf/config.go)（`conf.Config`），
+由 `config.Scan` 解码（json tag 绑定 key），启动时会校验必需项：
+
 ```yaml
 data:
   db:                  # MySQL 配置
-    host: localhost
-    port: 3306
-    user: root
-    password: your_password
-    db_name: gin_template
+    host: "${DB_HOST:localhost}"
+    port: "${DB_PORT:3306}"
+    user: "${DB_USER:root}"
+    password: "${DB_PASSWORD:your_password}"
+    db_name: "${DB_NAME:gin_template}"
   redis:               # Redis 配置
-    host: localhost
-    port: 6379
-    password: ""
+    host: "${REDIS_HOST:localhost}"
+    port: "${REDIS_PORT:6379}"
+    password: "${REDIS_PASSWORD:}"
 
 server:
   http:
-    host: 0.0.0.0
-    port: 8000
+    host: "${HTTP_HOST:0.0.0.0}"
+    port: "${HTTP_PORT:8000}"
     pprof:             # 性能分析
-      enable: true
-      port: 6060
+      enable: "${PPROF_ENABLE:true}"
+      host: "${PPROF_HOST:0.0.0.0}"
+      port: "${PPROF_PORT:6060}"
 
 log:
-  mode: dev            # dev | prod
-  level: debug         # debug | info | warn | error
-  dir: ./data/log      # 日志目录
+  mode: "${LOG_MODE:dev}"      # dev | prod
+  level: "${LOG_LEVEL:debug}"  # debug | info | warn | error
+  dir: "${LOG_DIR:./data/log}"
 
 app:
-  dev_mode: true       # 开发模式
-  enable_db_debug: true # 数据库调试日志
+  dev_mode: "${DEV_MODE:true}"
+  enable_db_debug: "${ENABLE_DB_DEBUG:true}"
 ```
+
+配置文件路径可用 `-conf` 指定（支持单个文件或目录）：
+
+```bash
+go run ./cmd/main -conf /etc/myapp/config.yaml
+```
+
+**扩展配置中心**：接入 etcd 等远程配置源时，只需在 [conf/config.go](conf/config.go)
+的 `config.WithSource(...)` 中追加对应 source（如 `contrib/config/etcd/v3`），
+再用 `conf.Watch(key, observer)` 注册热更新回调，业务代码无需改动。
+注意 `conf.Close()` 必须在进程退出前调用以释放 watcher（[cmd/main/main.go](cmd/main/main.go)
+已通过 defer 处理）。
 
 ## API 文档
 

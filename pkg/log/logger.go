@@ -30,7 +30,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/shengyanli1982/law"
-	"github.com/spf13/viper"
 	"go.uber.org/zap/buffer"
 	"go.uber.org/zap/exp/zapslog"
 	"go.uber.org/zap/zapcore"
@@ -61,10 +60,10 @@ var (
 //
 // 日志级别由 log.level 决定，并交给 zapcore 的 LevelEnabler 过滤；
 // 控制台与文件使用不同的编码器，文件始终输出无语义色彩的纯文本/JSON。
-func NewLogger(vc *viper.Viper) (*slog.Logger, error) {
-	mode := vc.GetString("log.mode")
-	level := vc.GetString("log.level")
-	logDir := vc.GetString("log.dir")
+func NewLogger(cfg *conf.Config) (*slog.Logger, error) {
+	mode := cfg.Log.Mode
+	level := cfg.Log.Level
+	logDir := cfg.Log.Dir
 	logPath := GetLogPath(logDir)
 
 	// 创建日志目录
