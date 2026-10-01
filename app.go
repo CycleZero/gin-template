@@ -1,13 +1,13 @@
 package main
 
 import (
+	"gin-template/pkg/infra"
+	"gin-template/pkg/log"
 	"net/http"
 	"strconv"
 
-	"gin-template/infra"
 	"gin-template/internal/domain"
 	"gin-template/internal/router"
-	"gin-template/log"
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"

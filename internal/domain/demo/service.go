@@ -1,10 +1,10 @@
 package demo
 
 import (
+	"gin-template/pkg/log"
 	"net/http"
 	"strconv"
 
-	"gin-template/log"
 	"gin-template/model"
 
 	"github.com/gin-gonic/gin"

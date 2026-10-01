@@ -2,7 +2,7 @@ package main
 
 import (
 	"gin-template/conf"
-	"gin-template/log"
+	"gin-template/pkg/log"
 	"os"
 	"os/signal"
 

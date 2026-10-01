@@ -4,9 +4,9 @@
 package main
 
 import (
-	"gin-template/infra"
 	"gin-template/internal"
-	"gin-template/log"
+	"gin-template/pkg/infra"
+	"gin-template/pkg/log"
 
 	"github.com/google/wire"
 	"github.com/spf13/viper"

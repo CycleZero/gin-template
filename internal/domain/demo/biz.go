@@ -1,8 +1,8 @@
 package demo
 
 import (
-	"gin-template/log"
 	"gin-template/model"
+	"gin-template/pkg/log"
 
 	"go.uber.org/zap"
 )

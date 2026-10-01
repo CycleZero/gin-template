@@ -1,11 +1,10 @@
 package middleware
 
 import (
+	"gin-template/pkg/log"
 	"net/http"
 	"slices"
 	"strings"
-
-	"gin-template/log"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"

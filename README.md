@@ -27,12 +27,12 @@ gin-template/
 ├── conf/                       # 配置模块
 │   └── viper.go                # Viper 配置加载
 │
-├── log/                        # 日志模块
-│   └── logger.go               # Zap 彩色日志
-│
-├── infra/                      # 基础设施层
-│   ├── provider.go             # Wire ProviderSet
-│   └── data.go                 # MySQL + Redis 初始化
+├── pkg/                        # 可复用基础设施
+│   ├── log/                    # 日志模块
+│   │   └── logger.go           # Zap 彩色日志
+│   └── infra/                  # 基础设施层
+│       ├── provider.go         # Wire ProviderSet
+│       └── data.go             # MySQL + Redis 初始化
 │
 ├── model/                      # 数据模型
 │   └── demo.go                 # 示例模型
@@ -76,7 +76,7 @@ HTTP 请求 → service.go (HTTP 层) → biz.go (业务逻辑层) → repo.go (
 
 ### 环境要求
 
-- Go 1.23+
+- Go 1.27.1+
 - MySQL 8.0+
 - Redis 6.0+（可选）
 
