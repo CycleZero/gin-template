@@ -1,23 +1,22 @@
 package demo
 
 import (
-	"gin-template/pkg/log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
 	"gin-template/model"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // DemoService HTTP 服务层 - 处理请求解析、参数校验、响应格式化
 type DemoService struct {
 	demoBiz *DemoBiz
-	logger  *log.Logger
+	logger  *slog.Logger
 }
 
-func NewDemoService(demoBiz *DemoBiz, logger *log.Logger) *DemoService {
+func NewDemoService(demoBiz *DemoBiz, logger *slog.Logger) *DemoService {
 	return &DemoService{
 		demoBiz: demoBiz,
 		logger:  logger,
@@ -35,7 +34,7 @@ func NewDemoService(demoBiz *DemoBiz, logger *log.Logger) *DemoService {
 func (s *DemoService) Create(c *gin.Context) {
 	var req CreateDemoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		s.logger.Error("解析创建请求失败", zap.Error(err))
+		s.logger.Error("解析创建请求失败", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
 		return
 	}

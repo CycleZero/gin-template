@@ -2,7 +2,7 @@ package main
 
 import (
 	"gin-template/pkg/infra"
-	"gin-template/pkg/log"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -39,7 +39,7 @@ func NewMainApp(
 	// 基础中间件
 	e.Use(gin.Logger())
 	e.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
-		log.SugaredLogger().Errorf("发生 Panic: %v", err)
+		slog.Error("发生 Panic", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "服务器内部错误"})
 	}))
 
@@ -66,16 +66,16 @@ func NewMainApp(
 
 func (a *MainApp) printRoutes() {
 	routes := a.Engine.Routes()
-	log.SugaredLogger().Infof("Total routes: %d", len(routes))
+	slog.Info("路由注册完成", "count", len(routes))
 	for _, route := range routes {
-		log.SugaredLogger().Infof("  %-6s %s", route.Method, route.Path)
+		slog.Info("注册路由", "method", route.Method, "path", route.Path)
 	}
 }
 
 // StartServer 启动 HTTP 服务
 func (a *MainApp) StartServer() error {
 	addr := a.host + ":" + strconv.FormatUint(uint64(a.port), 10)
-	log.GetLogger().Info("启动服务 " + addr)
+	slog.Info("启动服务", "addr", addr)
 	return a.Engine.Run(addr)
 }
 

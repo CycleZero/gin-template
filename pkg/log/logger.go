@@ -1,11 +1,29 @@
+// Package log 提供以标准库 log/slog 为门面、zap 为后端的日志能力。
+//
+// slog 与 zap 之间通过 go.uber.org/zap/exp/zapslog 桥接：
+// 业务代码只依赖 slog API，而编码（dev 彩色控制台 / prod JSON）、
+// 文件切割（lumberjack）与异步落盘（law）仍复用既有的 zapcore 配置。
+//
+// 用法：
+//
+//	slog.Info("服务已启动", "addr", addr)
+//	slog.Error("连接数据库失败", "error", err)
+//
+// GetLogger 会把构建出的 Logger 注册为 slog 默认 Logger，因此任意包内直接
+// 调用 slog.Info / slog.Error 即可；需要显式注入或替换时（例如测试）
+// 使用 GetLogger() 返回的 *slog.Logger（项目内 biz/service 通过 Wire 注入）。
 package log
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"gin-template/conf"
@@ -13,8 +31,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/shengyanli1982/law"
 	"github.com/spf13/viper"
-	"go.uber.org/zap"
 	"go.uber.org/zap/buffer"
+	"go.uber.org/zap/exp/zapslog"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -29,13 +47,21 @@ var (
 	Green  = color.New(color.FgHiGreen).SprintFunc()
 )
 
-type Logger struct {
-	*zap.Logger
-}
+var (
+	// newMu 保护 globalLogger 的懒加载。sync.Mutex 不可重入，
+	// 因此 GetLogger 持锁期间调用的 NewLogger 只能使用 writerMu。
+	newMu sync.Mutex
+	// writerMu 保护异步文件写入器列表
+	writerMu     sync.Mutex
+	globalLogger *slog.Logger
+	asyncWriters []*law.WriteAsyncer
+)
 
-var globalLogger *Logger
-
-func NewLogger(vc *viper.Viper) (*Logger, error) {
+// NewLogger 构建以 zap 为后端（zapslog 桥接）的 slog.Logger。
+//
+// 日志级别由 log.level 决定，并交给 zapcore 的 LevelEnabler 过滤；
+// 控制台与文件使用不同的编码器，文件始终输出无语义色彩的纯文本/JSON。
+func NewLogger(vc *viper.Viper) (*slog.Logger, error) {
 	mode := vc.GetString("log.mode")
 	level := vc.GetString("log.level")
 	logDir := vc.GetString("log.dir")
@@ -55,7 +81,7 @@ func NewLogger(vc *viper.Viper) (*Logger, error) {
 		return nil, err
 	}
 
-	// 编码器配置（带颜色）
+	// 编码器配置（带颜色，仅用于控制台）
 	encoderConfig := zapcore.EncoderConfig{
 		TimeKey:          "T",
 		LevelKey:         "L",
@@ -71,7 +97,7 @@ func NewLogger(vc *viper.Viper) (*Logger, error) {
 		ConsoleSeparator: " ",
 	}
 
-	// 无颜色的编码器配置（用于文件）
+	// 无颜色的编码器配置（用于文件，避免 ANSI 转义污染日志文件）
 	plainEncoderConfig := zapcore.EncoderConfig{
 		TimeKey:          "T",
 		LevelKey:         "L",
@@ -98,16 +124,18 @@ func NewLogger(vc *viper.Viper) (*Logger, error) {
 		fileEncoder = zapcore.NewConsoleEncoder(plainEncoderConfig)
 	} else {
 		consoleEncoder = &CustomEncoder{zapcore.NewJSONEncoder(encoderConfig)}
-		fileEncoder = zapcore.NewJSONEncoder(encoderConfig)
+		fileEncoder = zapcore.NewJSONEncoder(plainEncoderConfig)
 	}
 
-	consoleWriter := color.Output
-	consoleWriterSyncer := zapcore.AddSync(consoleWriter)
+	consoleWriterSyncer := zapcore.AddSync(color.Output)
 
 	var fileWriteSyncer zapcore.WriteSyncer
 	if logPath != "" {
 		fileWriter := NewFileWriter(logPath)
 		fileAsyncWriter := NewAsyncWriter(fileWriter)
+		writerMu.Lock()
+		asyncWriters = append(asyncWriters, fileAsyncWriter)
+		writerMu.Unlock()
 		fileWriteSyncer = zapcore.AddSync(fileAsyncWriter)
 	}
 
@@ -119,31 +147,46 @@ func NewLogger(vc *viper.Viper) (*Logger, error) {
 	}
 
 	core := zapcore.NewTee(cores...)
-	return &Logger{zap.New(core, zap.WithCaller(true))}, nil
+
+	// slog -> zap 桥接：caller 取 slog 调用点，Error 及以上附带堆栈
+	handler := zapslog.NewHandler(core,
+		zapslog.WithCaller(true),
+		zapslog.AddStacktraceAt(slog.LevelError),
+	)
+	return slog.New(handler), nil
 }
 
+// CustomEncoder 为 Warn/Error 级别的整行着色的编码器包装。
 type CustomEncoder struct {
 	zapcore.Encoder
 }
 
-func (c *CustomEncoder) EncodeEntry(entry zapcore.Entry, fields []zap.Field) (*buffer.Buffer, error) {
+func (c *CustomEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	buf, err := c.Encoder.EncodeEntry(entry, fields)
 	if err != nil {
 		return buf, err
 	}
 
+	var colorize func(a ...any) string
 	switch entry.Level {
 	case zapcore.WarnLevel:
-		e := buf.String()[:strings.LastIndex(buf.String(), ColorResetStr)+LenColorResetStr]
-		t := buf.String()[strings.LastIndex(buf.String(), ColorResetStr)+LenColorResetStr:]
-		buf.Reset()
-		buf.WriteString(e + Yellow(t))
+		colorize = Yellow
 	case zapcore.ErrorLevel:
-		e := buf.String()[:strings.LastIndex(buf.String(), ColorResetStr)+LenColorResetStr]
-		t := buf.String()[strings.LastIndex(buf.String(), ColorResetStr)+LenColorResetStr:]
-		buf.Reset()
-		buf.WriteString(e + Red(t))
+		colorize = Red
+	default:
+		return buf, nil
 	}
+
+	// 颜色关闭时编码结果中不含 ANSI 复位标记，此时保持原样
+	idx := strings.LastIndex(buf.String(), ColorResetStr)
+	if idx < 0 {
+		return buf, nil
+	}
+
+	head := buf.String()[:idx+LenColorResetStr]
+	tail := buf.String()[idx+LenColorResetStr:]
+	buf.Reset()
+	buf.WriteString(head + colorize(tail))
 	return buf, nil
 }
 
@@ -168,24 +211,71 @@ func customTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(color.New(color.FgCyan).SprintFunc()(t.Format("2006-01-02 15:04:05.000")))
 }
 
-func GetLogger() *Logger {
+// GetLogger 返回全局 slog.Logger（懒加载）并注册为 slog 默认 Logger。
+//
+// 注册后业务包可直接使用 slog.Info / slog.Error 等包级函数。
+func GetLogger() *slog.Logger {
+	newMu.Lock()
+	defer newMu.Unlock()
+
 	if globalLogger == nil {
-		var err error
-		globalLogger, err = NewLogger(conf.GetConfig())
+		logger, err := NewLogger(conf.GetConfig())
 		if err != nil {
 			fmt.Println("致命错误: 创建logger失败，触发panic", err)
 			panic("致命错误: 创建logger失败, 触发panic" + err.Error())
 		}
+		globalLogger = logger
+		slog.SetDefault(logger)
 	}
 	return globalLogger
 }
 
-func SugaredLogger() *zap.SugaredLogger {
-	return GetLogger().Sugar()
+// SetGlobalLogger 覆盖全局 Logger，并同步为 slog 默认 Logger（便于测试替换）。
+func SetGlobalLogger(l *slog.Logger) {
+	newMu.Lock()
+	globalLogger = l
+	newMu.Unlock()
+
+	slog.SetDefault(l)
 }
 
-func SetGlobalLogger(l *Logger) {
-	globalLogger = l
+// Close 停止异步文件写入器并 flush 缓冲，进程退出前调用一次即可。
+//
+// 异步写入器依赖空闲超时（默认 5s）或缓冲区写满才会落盘，不调用 Close
+// 会丢失进程退出前尚未刷新的日志。
+func Close() error {
+	writerMu.Lock()
+	writers := asyncWriters
+	asyncWriters = nil
+	writerMu.Unlock()
+
+	for _, w := range writers {
+		w.Stop()
+	}
+	return nil
+}
+
+// Fatal 记录一条 Error 级日志，flush 日志缓冲后以状态码 1 退出进程。
+//
+// os.Exit 不会执行 defer，因此初始化阶段的致命错误必须经由 Fatal 记录，
+// 否则异步文件日志会随进程退出而丢失。
+//
+// 这里手工构造 Record 并传入调用方 PC，使 caller 指向 Fatal 的调用点，
+// 而不是本文件中的包装函数。
+func Fatal(msg string, args ...any) {
+	var pcs [1]uintptr
+	runtime.Callers(2, pcs[:])
+
+	ctx := context.Background()
+	handler := slog.Default().Handler()
+	if handler.Enabled(ctx, slog.LevelError) {
+		record := slog.NewRecord(time.Now(), slog.LevelError, msg, pcs[0])
+		record.Add(args...)
+		_ = handler.Handle(ctx, record)
+	}
+
+	_ = Close()
+	os.Exit(1)
 }
 
 func GetLogPath(logDir string) string {

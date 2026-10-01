@@ -11,14 +11,13 @@ import (
 	"gin-template/internal/domain/demo"
 	"gin-template/internal/router"
 	"gin-template/pkg/infra"
-	"gin-template/pkg/log"
-
 	"github.com/spf13/viper"
+	"log/slog"
 )
 
 // Injectors from wire.go:
 
-func initApp(vc *viper.Viper, logger *log.Logger) *MainApp {
+func initApp(vc *viper.Viper, logger *slog.Logger) *MainApp {
 	client := infra.NewRedisClient(vc)
 	redisClient := infra.NewCustomRedisClient(client)
 	data := infra.NewData(vc, redisClient)

@@ -9,7 +9,8 @@
 | [Gin](https://github.com/gin-gonic/gin) | HTTP Web 框架 |
 | [Wire](https://github.com/google/wire) | 依赖注入代码生成 |
 | [Viper](https://github.com/spf13/viper) | 配置管理 |
-| [Zap](https://github.com/uber-go/zap) | 高性能日志 |
+| [log/slog](https://pkg.go.dev/log/slog) | 结构化日志门面（业务代码统一入口） |
+| [Zap](https://github.com/uber-go/zap) | 日志后端，经 zapslog 桥接到 slog |
 | [GORM](https://gorm.io) | ORM 框架 (MySQL) |
 | [Redis](https://github.com/redis/go-redis) | 缓存/会话 |
 | [JWT](https://github.com/golang-jwt/jwt) | 认证授权 |
@@ -29,7 +30,7 @@ gin-template/
 │
 ├── pkg/                        # 可复用基础设施
 │   ├── log/                    # 日志模块
-│   │   └── logger.go           # Zap 彩色日志
+│   │   └── logger.go           # slog 门面 + zap 后端（zapslog 桥接）
 │   └── infra/                  # 基础设施层
 │       ├── provider.go         # Wire ProviderSet
 │       └── data.go             # MySQL + Redis 初始化
@@ -72,6 +73,38 @@ HTTP 请求 → service.go (HTTP 层) → biz.go (业务逻辑层) → repo.go (
 - **repo.go**: 数据库操作封装（GORM）
 - **dto.go**: 请求/响应数据结构定义
 
+## 日志
+
+业务代码统一使用标准库 `log/slog`，后端由 zap 驱动（经
+[`zapslog`](https://pkg.go.dev/go.uber.org/zap/exp/zapslog) 桥接），
+既保留 slog 的简洁 API，又复用 zap 的编码、lumberjack 切割与异步落盘能力。
+
+```go
+slog.Info("创建成功", "id", id, "user_id", uid)
+slog.Error("查询失败", "error", err)
+```
+
+- `log.GetLogger()` 构建后端并注册为 slog 默认 Logger（`slog.SetDefault`），
+  因此任意包内直接调用 `slog.Info` / `slog.Error` 等包级函数即可，无需层层传递。
+- 需要显式注入或替换时使用 `*slog.Logger`：`biz.go` / `service.go` 由 Wire 注入，
+  测试时可通过 `log.SetGlobalLogger` 或注入自定义 handler 替换。
+- 初始化阶段的致命错误使用 `log.Fatal(...)`：它先 flush 再 `os.Exit(1)`
+  （`os.Exit` 不会执行 defer，直接用 os.Exit 会丢掉文件日志）。
+- 进程退出前 `main` 中的 `defer log.Close()` 会停止异步写入器并 flush；
+  异步写入器默认 5s 空闲或写满 2MB 才落盘，不 flush 会丢失缓冲日志。
+
+`config.yaml` 的 `log` 段控制行为：
+
+```yaml
+log:
+  mode: dev        # dev = 控制台彩色文本；prod = JSON
+  level: debug     # 低于该级别的日志被 zapcore 直接丢弃
+  dir: ./data/log  # 按日期分目录、按时间命名，10MB 切割；留空则只输出到控制台
+```
+
+日志中的 `caller` 始终指向实际调用点（`zapslog.WithCaller`），
+`Error` 及以上级别自动附带堆栈；文件输出始终为无 ANSI 转义的纯文本/JSON。
+
 ## 快速开始
 
 ### 环境要求
@@ -97,13 +130,10 @@ cp config.yaml.example config.yaml
 # 4. 安装依赖
 go mod tidy
 
-# 5. 安装 Wire 工具
-go install github.com/google/wire/cmd/wire@latest
-
-# 6. 生成依赖注入代码
+# 5. 生成依赖注入代码（通过 go run 使用 go.mod 锁定的 wire 版本，无需预装 wire 二进制）
 make wire
 
-# 7. 启动服务
+# 6. 启动服务
 make run
 ```
 
@@ -159,7 +189,7 @@ app:
 ## 构建命令
 
 ```bash
-make wire        # 生成 Wire 依赖注入代码
+make wire        # 生成 Wire 依赖注入代码（go run，无需预装 wire）
 make build       # 编译
 make rebuild     # wire + build
 make run         # 直接运行

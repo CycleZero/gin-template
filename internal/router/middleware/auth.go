@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"gin-template/pkg/log"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -37,11 +37,11 @@ func JwtAuthMiddleWire(jwtSecret string) func(optional bool) gin.HandlerFunc {
 
 			if err != nil || !token.Valid {
 				if optional {
-					log.SugaredLogger().Warnf("JWT 解析失败: %v", err)
+					slog.Warn("JWT 解析失败", "error", err)
 					c.Next()
 					return
 				}
-				log.SugaredLogger().Warnf("认证失败: %v", err)
+				slog.Warn("认证失败", "error", err)
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "无效的认证令牌"})
 				return
 			}

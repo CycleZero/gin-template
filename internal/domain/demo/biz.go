@@ -1,19 +1,18 @@
 package demo
 
 import (
-	"gin-template/model"
-	"gin-template/pkg/log"
+	"log/slog"
 
-	"go.uber.org/zap"
+	"gin-template/model"
 )
 
 // DemoBiz 业务逻辑层 - 处理业务规则和数据转换
 type DemoBiz struct {
-	logger   *log.Logger
+	logger   *slog.Logger
 	demoRepo *DemoRepo
 }
 
-func NewDemoBiz(logger *log.Logger, demoRepo *DemoRepo) *DemoBiz {
+func NewDemoBiz(logger *slog.Logger, demoRepo *DemoRepo) *DemoBiz {
 	return &DemoBiz{
 		logger:   logger,
 		demoRepo: demoRepo,
@@ -30,7 +29,7 @@ func (b *DemoBiz) Create(name, description string, createdBy uint) (*model.Demo,
 	}
 	err := b.demoRepo.Create(demo)
 	if err != nil {
-		b.logger.Error("创建 Demo 失败", zap.Error(err))
+		b.logger.Error("创建 Demo 失败", "error", err)
 		return nil, err
 	}
 	return demo, nil
@@ -40,7 +39,7 @@ func (b *DemoBiz) Create(name, description string, createdBy uint) (*model.Demo,
 func (b *DemoBiz) GetByID(id uint) (*model.Demo, error) {
 	demo, err := b.demoRepo.GetByID(id)
 	if err != nil {
-		b.logger.Error("获取 Demo 失败", zap.Error(err), zap.Uint("id", id))
+		b.logger.Error("获取 Demo 失败", "error", err, "id", id)
 		return nil, err
 	}
 	return demo, nil
@@ -55,14 +54,14 @@ func (b *DemoBiz) List(page, pageSize int) ([]*model.Demo, int64, error) {
 func (b *DemoBiz) Update(id uint, name, description string) (*model.Demo, error) {
 	demo, err := b.demoRepo.GetByID(id)
 	if err != nil {
-		b.logger.Error("获取 Demo 失败", zap.Error(err), zap.Uint("id", id))
+		b.logger.Error("获取 Demo 失败", "error", err, "id", id)
 		return nil, err
 	}
 	demo.Name = name
 	demo.Description = description
 	err = b.demoRepo.Update(demo)
 	if err != nil {
-		b.logger.Error("更新 Demo 失败", zap.Error(err))
+		b.logger.Error("更新 Demo 失败", "error", err)
 		return nil, err
 	}
 	return demo, nil

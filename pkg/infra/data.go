@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"time"
 
+	"gin-template/pkg/log"
+
 	"github.com/redis/go-redis/v9"
 	"github.com/spf13/viper"
-	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -48,13 +49,12 @@ func NewData(vc *viper.Viper, rdb *RedisClient) *Data {
 	dbname := vc.GetString("data.db.db_name")
 	dsn := getDsn(host, port, user, password, dbname)
 
-	clogger, _ := zap.NewDevelopment()
 	masterDB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
-		clogger.Fatal("连接数据库失败", zap.Error(err))
+		log.Fatal("连接数据库失败", "error", err)
 	}
 
 	return &Data{

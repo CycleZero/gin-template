@@ -2,9 +2,9 @@ BINARY_NAME := app
 BINARY_PATH := ./bin/${BINARY_NAME}
 MAIN_FILE_DIR := ./
 
-# wire 依赖注入代码生成
+# wire 依赖注入代码生成（go run 使用 go.mod 锁定的 wire 版本，无需预装 wire 二进制）
 wire:
-	wire ${MAIN_FILE_DIR}
+	go run -mod=mod github.com/google/wire/cmd/wire ${MAIN_FILE_DIR}
 
 # 编译
 build:
