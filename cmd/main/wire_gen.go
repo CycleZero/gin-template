@@ -10,7 +10,9 @@ import (
 	"gin-template/internal"
 	"gin-template/internal/conf"
 	"gin-template/internal/domain"
-	"gin-template/internal/domain/demo"
+	"gin-template/internal/domain/demo/biz"
+	"gin-template/internal/domain/demo/data"
+	"gin-template/internal/domain/demo/service"
 	"gin-template/internal/router"
 	"gin-template/pkg/infra"
 	"log/slog"
@@ -21,13 +23,13 @@ import (
 func initApp(cfg *conf.Bootstrap, logger *slog.Logger) *internal.MainApp {
 	client := infra.NewRedisClient(cfg)
 	redisClient := infra.NewCustomRedisClient(client)
-	data := infra.NewData(cfg, redisClient)
-	demoRepo := demo.NewDemoRepo(data)
-	demoBiz := demo.NewDemoBiz(logger, demoRepo)
-	demoService := demo.NewDemoService(demoBiz, logger)
+	infraData := infra.NewData(cfg, redisClient)
+	demoRepo := data.NewDemoRepo(infraData)
+	demoBiz := biz.NewDemoBiz(logger, demoRepo)
+	demoService := service.NewDemoService(demoBiz, logger)
 	serviceHub := domain.NewServiceHub(demoService)
 	registerFunc := router.NewRegisterFunc()
 	registeredMiddleWire := router.NewRegisterMiddleWire()
-	mainApp := internal.NewMainApp(cfg, serviceHub, registerFunc, registeredMiddleWire, data)
+	mainApp := internal.NewMainApp(cfg, serviceHub, registerFunc, registeredMiddleWire, infraData)
 	return mainApp
 }

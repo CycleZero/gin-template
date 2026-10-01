@@ -1,4 +1,4 @@
-package demo
+package service
 
 // CreateDemoRequest 创建请求
 type CreateDemoRequest struct {

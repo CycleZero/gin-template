@@ -65,12 +65,11 @@ gin-template/
 │   ├── domain/                 # 业务领域（DDD 分层）
 │   │   ├── hub.go              # ServiceHub 服务聚合
 │   │   ├── provider.go         # Domain Wire 聚合
-│   │   └── demo/               # 示例业务模块
-│   │       ├── provider.go     # 模块 Wire Set
-│   │       ├── service.go      # HTTP 处理层
-│   │       ├── biz.go          # 业务逻辑层
-│   │       ├── repo.go         # 数据访问层
-│   │       └── dto.go          # 数据传输对象
+│   │   └── demo/               # 示例业务模块（按层分目录）
+│   │       ├── provider.go     # 模块 Wire Set（按层聚合）
+│   │       ├── service/        # HTTP 层：service.go + dto.go + provider.go
+│   │       ├── biz/            # 业务层：biz.go + provider.go
+│   │       └── data/           # 数据层：repo.go + provider.go
 │   └── router/                 # 路由层
 │       ├── provider.go         # 中间件注册
 │       ├── root.go             # 路由注册
@@ -82,16 +81,32 @@ gin-template/
 
 ## 分层架构
 
-每个业务模块遵循三层架构：
+每个业务模块按层分目录，依赖方向**单向向下**（不会出现循环导入）：
 
 ```
-HTTP 请求 → service.go (HTTP 层) → biz.go (业务逻辑层) → repo.go (数据访问层) → DB
+HTTP 请求 → <svc>/service/ (HTTP 层) → <svc>/biz/ (业务层) → <svc>/data/ (数据层) → DB
 ```
 
-- **service.go**: 处理 HTTP 请求解析、参数校验、响应格式化
-- **biz.go**: 业务逻辑、数据校验、流程编排
-- **repo.go**: 数据库操作封装（GORM）
-- **dto.go**: 请求/响应数据结构定义
+```
+internal/domain/<svc>/
+├── provider.go     # 模块 Wire Set：聚合下面三层的 ProviderSet
+├── service/        # HTTP 层
+│   ├── service.go  # 请求解析、参数校验、响应格式化
+│   ├── dto.go      # 请求/响应数据结构
+│   └── provider.go # service.ProviderSet
+├── biz/            # 业务层
+│   ├── biz.go      # 业务规则、数据校验、流程编排
+│   └── provider.go # biz.ProviderSet
+└── data/           # 数据层
+    ├── repo.go     # 数据库操作封装（GORM）
+    └── provider.go # data.ProviderSet
+```
+
+各层约束：
+
+- **service/** 只依赖 `biz/`，不直接访问数据库；DTO 与 HTTP 语义都收敛在这一层
+- **biz/** 只依赖 `data/` 与 `model/`，不感知 HTTP（同一份业务可复用于 gRPC、定时任务等）
+- **data/** 只依赖 `pkg/infra` 与 `model/`，不感知业务规则
 
 ## 日志
 
@@ -323,10 +338,16 @@ make build-linux # 交叉编译 Linux
 
 ## 添加新业务模块
 
-1. 在 `internal/domain/` 下创建新目录，例如 `user/`
-2. 创建 `provider.go`、`service.go`、`biz.go`、`repo.go`、`dto.go`
-3. 在 `internal/domain/hub.go` 的 `ServiceHub` 中添加新 Service
-4. 在 `internal/domain/provider.go` 中引入新模块的 ProviderSet
+以新增 `user` 模块为例（按层分目录，可直接复制 `demo/` 的骨架）：
+
+1. 创建目录与文件：
+   - `internal/domain/user/service/{service.go,dto.go,provider.go}`：HTTP 层
+   - `internal/domain/user/biz/{biz.go,provider.go}`：业务层
+   - `internal/domain/user/data/{repo.go,provider.go}`：数据层
+   - `internal/domain/user/provider.go`：聚合三层 ProviderSet
+2. 各层只依赖下一层：`service → biz → data`（`data` 依赖 `pkg/infra` 与 `model`）
+3. 在 `internal/domain/hub.go` 的 `ServiceHub` 中添加新的 Service 字段
+4. 在 `internal/domain/provider.go` 中引入 `user.ProviderSet`
 5. 在 `internal/router/root.go` 中注册新路由
 6. 运行 `make wire` 重新生成依赖注入代码
 

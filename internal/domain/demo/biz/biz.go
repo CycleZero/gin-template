@@ -1,18 +1,22 @@
-package demo
+// Package biz 是 demo 模块的业务逻辑层：业务规则、流程编排与数据转换。
+//
+// 只依赖 data 层与 model，不感知 HTTP（因此可被 HTTP / gRPC / 定时任务等复用）。
+package biz
 
 import (
 	"log/slog"
 
+	"gin-template/internal/domain/demo/data"
 	"gin-template/model"
 )
 
 // DemoBiz 业务逻辑层 - 处理业务规则和数据转换
 type DemoBiz struct {
 	logger   *slog.Logger
-	demoRepo *DemoRepo
+	demoRepo *data.DemoRepo
 }
 
-func NewDemoBiz(logger *slog.Logger, demoRepo *DemoRepo) *DemoBiz {
+func NewDemoBiz(logger *slog.Logger, demoRepo *data.DemoRepo) *DemoBiz {
 	return &DemoBiz{
 		logger:   logger,
 		demoRepo: demoRepo,

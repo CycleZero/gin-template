@@ -1,4 +1,7 @@
-package demo
+// Package data 是 demo 模块的数据访问层：封装对 demo 表的 GORM 操作。
+//
+// 只依赖 pkg/infra 与 model，不感知业务规则与 HTTP。
+package data
 
 import (
 	"gin-template/model"
@@ -9,16 +12,16 @@ import (
 
 // DemoRepo 数据访问层 - 封装对 demo 表的数据库操作
 type DemoRepo struct {
-	db   *gorm.DB
-	data *infra.Data
+	db        *gorm.DB
+	infraData *infra.Data
 }
 
-func NewDemoRepo(data *infra.Data) *DemoRepo {
+func NewDemoRepo(infraData *infra.Data) *DemoRepo {
 	// AutoMigrate 自动创建/更新表结构
-	if err := data.DB.AutoMigrate(&model.Demo{}); err != nil {
+	if err := infraData.DB.AutoMigrate(&model.Demo{}); err != nil {
 		panic(err)
 	}
-	return &DemoRepo{db: data.DB, data: data}
+	return &DemoRepo{db: infraData.DB, infraData: infraData}
 }
 
 // Create 创建记录

@@ -1,10 +1,14 @@
-package demo
+// Package service 是 demo 模块的 HTTP 层：请求解析、参数校验、响应格式化。
+//
+// 只依赖 biz 层，不直接访问数据库；请求/响应结构见同包的 dto.go。
+package service
 
 import (
 	"log/slog"
 	"net/http"
 	"strconv"
 
+	"gin-template/internal/domain/demo/biz"
 	"gin-template/model"
 
 	"github.com/gin-gonic/gin"
@@ -12,11 +16,11 @@ import (
 
 // DemoService HTTP 服务层 - 处理请求解析、参数校验、响应格式化
 type DemoService struct {
-	demoBiz *DemoBiz
+	demoBiz *biz.DemoBiz
 	logger  *slog.Logger
 }
 
-func NewDemoService(demoBiz *DemoBiz, logger *slog.Logger) *DemoService {
+func NewDemoService(demoBiz *biz.DemoBiz, logger *slog.Logger) *DemoService {
 	return &DemoService{
 		demoBiz: demoBiz,
 		logger:  logger,
