@@ -1,0 +1,11 @@
+version: v2
+
+plugins:
+  # 本地插件（protoc-gen-go 需在 PATH 上：
+  #   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest）
+  - local: protoc-gen-go
+    # 与 buf.yaml 中 modules.path(internal) 对应，
+    # 使 internal/conf/conf.proto 生成到 internal/conf/conf.pb.go
+    out: internal
+    opt:
+      - paths=source_relative

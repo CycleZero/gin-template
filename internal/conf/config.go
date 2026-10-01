@@ -1,5 +1,8 @@
 // Package conf 基于 Kratos v3 的 config 组件加载配置。
 //
+// 配置结构由 internal/conf/conf.proto 定义，经 buf 生成为 conf.pb.go
+// （make config），本文件只放加载流程与手写方法（DSN/Addr/Validate）。
+//
 // 加载顺序即优先级（后加载的 source 覆盖先加载的）：
 //
 //	file source：默认值，来自版本库中的 config.yaml
@@ -39,96 +42,63 @@ const (
 	EnvPrefix = "APP_"
 )
 
-// Config 应用配置的强类型模型，与 config.yaml 结构一一对应。
-// Kratos 的 Scan 走 JSON 解码，因此 key 与字段通过 json tag 绑定。
-type Config struct {
-	Data   Data   `json:"data"`
-	Server Server `json:"server"`
-	Log    Log    `json:"log"`
-	App    App    `json:"app"`
-}
-
-// Data 数据层配置。
-type Data struct {
-	DB    DB    `json:"db"`
-	Redis Redis `json:"redis"`
-}
-
-// DB MySQL 配置。
-type DB struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	Name     string `json:"db_name"`
-}
-
 // DSN 组装 go-sql-driver/mysql 连接串。
-func (d DB) DSN() string {
-	addr := net.JoinHostPort(d.Host, strconv.Itoa(d.Port))
-	return d.User + ":" + d.Password + "@tcp(" + addr + ")/" + d.Name +
+func (x *DB) DSN() string {
+	if x == nil {
+		return ""
+	}
+	addr := net.JoinHostPort(x.GetHost(), strconv.Itoa(int(x.GetPort())))
+	return x.GetUser() + ":" + x.GetPassword() + "@tcp(" + addr + ")/" + x.GetDbName() +
 		"?charset=utf8mb4&parseTime=True&loc=Local"
 }
 
-// Redis 配置。
-type Redis struct {
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
-	Password string `json:"password"`
-}
-
-// Addr 返回 host:port。
-func (r Redis) Addr() string {
-	return net.JoinHostPort(r.Host, strconv.Itoa(r.Port))
-}
-
-// Server 服务端配置。
-type Server struct {
-	HTTP HTTP `json:"http"`
-}
-
-// HTTP HTTP 服务配置。
-type HTTP struct {
-	Host  string `json:"host"`
-	Port  uint32 `json:"port"`
-	Pprof Pprof  `json:"pprof"`
+// Addr 返回 Redis 的 host:port。
+func (x *Redis) Addr() string {
+	if x == nil {
+		return ""
+	}
+	return net.JoinHostPort(x.GetHost(), strconv.Itoa(int(x.GetPort())))
 }
 
 // Addr 返回 HTTP 监听地址。
-func (h HTTP) Addr() string {
-	return net.JoinHostPort(h.Host, strconv.Itoa(int(h.Port)))
+func (x *HTTP) Addr() string {
+	if x == nil {
+		return ""
+	}
+	return net.JoinHostPort(x.GetHost(), strconv.Itoa(int(x.GetPort())))
 }
 
-// Pprof 性能分析配置。
-type Pprof struct {
-	Enable bool   `json:"enable"`
-	Host   string `json:"host"`
-	Port   uint32 `json:"port"`
-}
-
-// Log 日志配置。
-type Log struct {
-	Mode  string `json:"mode"`
-	Level string `json:"level"`
-	Dir   string `json:"dir"`
-}
-
-// App 应用配置。
-type App struct {
-	DevMode       bool `json:"dev_mode"`
-	EnableDBDebug bool `json:"enable_db_debug"`
+// Validate 校验启动必需项，避免带着空地址/端口跑到运行期才报错。
+//
+// 全部通过 getter 访问，因此缺字段时返回明确的错误而不是空指针崩溃。
+func (x *Bootstrap) Validate() error {
+	if x == nil {
+		return errors.New("配置校验失败: 配置为空")
+	}
+	if x.GetServer().GetHttp().GetPort() == 0 {
+		return errors.New("配置校验失败: server.http.port 不能为 0")
+	}
+	if x.GetData().GetDb().GetHost() == "" || x.GetData().GetDb().GetDbName() == "" {
+		return errors.New("配置校验失败: data.db.host / data.db.db_name 不能为空")
+	}
+	switch mode := x.GetLog().GetMode(); mode {
+	case "dev", "prod":
+	default:
+		return fmt.Errorf("配置校验失败: log.mode 只能是 dev 或 prod，当前为 %q", mode)
+	}
+	return nil
 }
 
 var (
 	mu     sync.Mutex // 保护 globalConfig / kratosConfig
 	loadMu sync.Mutex // 串行化加载过程（load 不持有 mu，避免自死锁）
 
-	globalConfig *Config
+	globalConfig *Bootstrap
 	kratosConfig config.Config // 保留句柄以便 Watch / Close
 )
 
 // load 真正执行加载，不读写全局状态。
-func load(path string) (config.Config, *Config, error) {
+func load(path string) (config.Config, *Bootstrap, error) {
 	c := config.New(
 		config.WithSource(
 			file.NewSource(path),     // 默认值：版本库中的配置文件
@@ -142,38 +112,24 @@ func load(path string) (config.Config, *Config, error) {
 		return nil, nil, fmt.Errorf("加载配置失败(%s): %w", path, err)
 	}
 
-	var out Config
-	if err := c.Scan(&out); err != nil {
+	out := new(Bootstrap) // conf.proto 生成类型，Scan 走 protojson
+	if err := c.Scan(out); err != nil {
 		_ = c.Close()
 		return nil, nil, fmt.Errorf("解析配置失败(%s): %w", path, err)
 	}
 
-	if err := out.validate(); err != nil {
+	if err := out.Validate(); err != nil {
 		_ = c.Close()
 		return nil, nil, err
 	}
-	return c, &out, nil
+	return c, out, nil
 }
 
-// validate 校验启动必需项，避免带着空地址/端口跑到运行期才报错。
-func (c *Config) validate() error {
-	if c.Server.HTTP.Port == 0 {
-		return errors.New("配置校验失败: server.http.port 不能为 0")
-	}
-	if c.Data.DB.Host == "" || c.Data.DB.Name == "" {
-		return errors.New("配置校验失败: data.db.host / data.db.db_name 不能为空")
-	}
-	if c.Log.Mode != "dev" && c.Log.Mode != "prod" {
-		return fmt.Errorf("配置校验失败: log.mode 只能是 dev 或 prod，当前为 %q", c.Log.Mode)
-	}
-	return nil
-}
-
-// Load 加载配置并解码为强类型 Config（默认路径 DefaultPath）。
+// Load 加载配置并解码为 conf.Bootstrap（默认路径 DefaultPath）。
 //
 // 加载成功后会把内部 config 句柄记录为全局句柄，以便 Close 释放 watcher；
-// 返回的 *Config 与全局配置相互独立。
-func Load(paths ...string) (*Config, error) {
+// 返回的 *Bootstrap 与全局配置相互独立。
+func Load(paths ...string) (*Bootstrap, error) {
 	path := DefaultPath
 	if len(paths) > 0 && paths[0] != "" {
 		path = paths[0]
@@ -192,7 +148,7 @@ func Load(paths ...string) (*Config, error) {
 
 // GetConfig 返回全局配置单例（首次调用时按 DefaultPath 加载）。
 // 加载失败属于启动期致命错误，直接终止进程。
-func GetConfig(paths ...string) *Config {
+func GetConfig(paths ...string) *Bootstrap {
 	mu.Lock()
 	if globalConfig != nil {
 		out := globalConfig
@@ -232,7 +188,7 @@ func GetConfig(paths ...string) *Config {
 }
 
 // SetConfig 覆盖全局配置，便于测试注入。
-func SetConfig(c *Config) {
+func SetConfig(c *Bootstrap) {
 	mu.Lock()
 	globalConfig = c
 	mu.Unlock()

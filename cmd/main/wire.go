@@ -6,14 +6,14 @@ package main
 import (
 	"log/slog"
 
-	"gin-template/conf"
 	"gin-template/internal"
+	"gin-template/internal/conf"
 	"gin-template/pkg/infra"
 
 	"github.com/google/wire"
 )
 
-func initApp(cfg *conf.Config, logger *slog.Logger) *internal.MainApp {
+func initApp(cfg *conf.Bootstrap, logger *slog.Logger) *internal.MainApp {
 	panic(wire.Build(
 		internal.NewMainApp,
 		infra.ProviderSet,

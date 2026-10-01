@@ -26,7 +26,7 @@ import (
 	"sync"
 	"time"
 
-	"gin-template/conf"
+	"gin-template/internal/conf"
 
 	"github.com/fatih/color"
 	"github.com/shengyanli1982/law"
@@ -60,10 +60,10 @@ var (
 //
 // 日志级别由 log.level 决定，并交给 zapcore 的 LevelEnabler 过滤；
 // 控制台与文件使用不同的编码器，文件始终输出无语义色彩的纯文本/JSON。
-func NewLogger(cfg *conf.Config) (*slog.Logger, error) {
-	mode := cfg.Log.Mode
-	level := cfg.Log.Level
-	logDir := cfg.Log.Dir
+func NewLogger(cfg *conf.Bootstrap) (*slog.Logger, error) {
+	mode := cfg.GetLog().GetMode()
+	level := cfg.GetLog().GetLevel()
+	logDir := cfg.GetLog().GetDir()
 	logPath := GetLogPath(logDir)
 
 	// 创建日志目录
@@ -293,7 +293,7 @@ func NewFileWriter(logPath string) *lumberjack.Logger {
 }
 
 func NewAsyncWriter(w io.Writer) *law.WriteAsyncer {
-	conf := law.NewConfig()
-	conf.WithBufferSize(1024 * 1024 * 2)
-	return law.NewWriteAsyncer(w, conf)
+	lawConf := law.NewConfig()
+	lawConf.WithBufferSize(1024 * 1024 * 2)
+	return law.NewWriteAsyncer(w, lawConf)
 }

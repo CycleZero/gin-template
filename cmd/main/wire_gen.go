@@ -7,8 +7,8 @@
 package main
 
 import (
-	"gin-template/conf"
 	"gin-template/internal"
+	"gin-template/internal/conf"
 	"gin-template/internal/domain"
 	"gin-template/internal/domain/demo"
 	"gin-template/internal/router"
@@ -18,7 +18,7 @@ import (
 
 // Injectors from wire.go:
 
-func initApp(cfg *conf.Config, logger *slog.Logger) *internal.MainApp {
+func initApp(cfg *conf.Bootstrap, logger *slog.Logger) *internal.MainApp {
 	client := infra.NewRedisClient(cfg)
 	redisClient := infra.NewCustomRedisClient(client)
 	data := infra.NewData(cfg, redisClient)

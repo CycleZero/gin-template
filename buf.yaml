@@ -1,0 +1,19 @@
+version: v2
+
+# 模块根设为 internal：这样 proto 路径 conf/conf.proto 与其 package conf 一致
+# （buf 的 PACKAGE_DIRECTORY_MATCH 规则），同时保持 Kratos 的 internal/conf 目录约定。
+# 将来若新增 api/<service>/v1/*.proto，在这里再加一个 module 即可。
+modules:
+  - path: internal
+
+lint:
+  use:
+    - STANDARD
+  except:
+    # 配置包不是对外 API，不引入 v1 版本后缀
+    # （Kratos 官方 conf.proto 同样使用 package conf;）
+    - PACKAGE_VERSION_SUFFIX
+
+breaking:
+  use:
+    - FILE

@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"gin-template/conf"
+	"gin-template/internal/conf"
 	"gin-template/internal/domain"
 	"gin-template/internal/router"
 	"gin-template/pkg/infra"
@@ -24,7 +24,7 @@ type MainApp struct {
 
 // NewMainApp 创建主应用实例（由 Wire 注入）
 func NewMainApp(
-	cfg *conf.Config,
+	cfg *conf.Bootstrap,
 	hub *domain.ServiceHub,
 	registerFunc router.RegisterFunc,
 	registeredMiddleWire router.RegisteredMiddleWire,
@@ -52,7 +52,7 @@ func NewMainApp(
 
 	app := &MainApp{
 		Engine:       e,
-		addr:         cfg.Server.HTTP.Addr(),
+		addr:         cfg.GetServer().GetHttp().Addr(),
 		ServiceHub:   hub,
 		RegisterFunc: registerFunc,
 	}

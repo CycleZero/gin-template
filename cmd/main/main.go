@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/signal"
 
-	"gin-template/conf"
+	"gin-template/internal/conf"
 	"gin-template/pkg/log"
 )
 

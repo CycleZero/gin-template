@@ -8,6 +8,7 @@
 |------|------|
 | [Gin](https://github.com/gin-gonic/gin) | HTTP Web 框架 |
 | [Wire](https://github.com/google/wire) | 依赖注入代码生成 |
+| [buf](https://buf.build) + [protobuf](https://protobuf.dev) | 配置结构定义与代码生成 |
 | [Kratos config](https://go-kratos.dev/docs/component/config/) | 配置加载（file + env source，可扩展 etcd 等） |
 | [log/slog](https://pkg.go.dev/log/slog) | 结构化日志门面（业务代码统一入口） |
 | [Zap](https://github.com/uber-go/zap) | 日志后端，经 zapslog 桥接到 slog |
@@ -24,10 +25,8 @@ gin-template/
 │       ├── main.go             # 启动、信号处理
 │       └── wire.go / wire_gen.go  # Wire 依赖注入
 ├── makefile                    # 构建命令
+├── buf.yaml / buf.gen.yaml     # protobuf 模块与代码生成配置
 ├── config.yaml.example         # 配置文件示例
-│
-├── conf/                       # 配置模块
-│   └── config.go               # Kratos config 加载（file + env source）+ 强类型 Config
 │
 ├── pkg/                        # 可复用基础设施
 │   ├── log/                    # 日志模块
@@ -42,6 +41,10 @@ gin-template/
 ├── internal/                   # 内部模块
 │   ├── app.go                  # 应用封装（Gin Engine，package internal）
 │   ├── provider.go             # 内部 Wire 聚合
+│   ├── conf/                   # 配置模块
+│   │   ├── conf.proto          # 配置结构定义（protobuf，唯一真相源）
+│   │   ├── conf.pb.go          # buf 生成（make config），入库以保证无工具链可构建
+│   │   └── config.go           # Kratos config 加载（file + env source）+ DSN/Addr/Validate
 │   ├── common/                 # 公共组件
 │   │   └── request_meta.go     # 请求元数据
 │   ├── domain/                 # 业务领域（DDD 分层）
@@ -158,8 +161,10 @@ make run
 APP_DB_HOST=10.0.0.12 APP_DB_PORT=3400 APP_DB_PASSWORD=secret ./app
 ```
 
-配置模型是强类型结构体 [conf/config.go](conf/config.go)（`conf.Config`），
-由 `config.Scan` 解码（json tag 绑定 key），启动时会校验必需项：
+配置结构由 [internal/conf/conf.proto](internal/conf/conf.proto) 定义（protobuf 是唯一真相源），
+用 `make config` 经 buf 生成 `conf.pb.go`；`config.Scan` 通过 protojson 解码
+（protojson 同时接受原始字段名与 lowerCamelCase，因此 YAML 键名即字段名，无需转换），
+手写的 `DSN()` / `Addr()` / `Validate()` 放在同包的 [internal/conf/config.go](internal/conf/config.go)：
 
 ```yaml
 data:
@@ -199,7 +204,7 @@ app:
 go run ./cmd/main -conf /etc/myapp/config.yaml
 ```
 
-**扩展配置中心**：接入 etcd 等远程配置源时，只需在 [conf/config.go](conf/config.go)
+**扩展配置中心**：接入 etcd 等远程配置源时，只需在 [internal/conf/config.go](internal/conf/config.go)
 的 `config.WithSource(...)` 中追加对应 source（如 `contrib/config/etcd/v3`），
 再用 `conf.Watch(key, observer)` 注册热更新回调，业务代码无需改动。
 注意 `conf.Close()` 必须在进程退出前调用以释放 watcher（[cmd/main/main.go](cmd/main/main.go)
@@ -220,9 +225,10 @@ go run ./cmd/main -conf /etc/myapp/config.yaml
 ## 构建命令
 
 ```bash
+make config      # 生成 protobuf 代码（buf lint + buf generate，需 buf 与 protoc-gen-go）
 make wire        # 生成 Wire 依赖注入代码（go run，无需预装 wire）
 make build       # 编译
-make rebuild     # wire + build
+make rebuild     # config + wire + build
 make run         # 直接运行
 make tidy        # 整理依赖
 make build-linux # 交叉编译 Linux

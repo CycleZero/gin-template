@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"gin-template/conf"
+	"gin-template/internal/conf"
 	"gin-template/pkg/log"
 
 	"github.com/redis/go-redis/v9"
@@ -41,8 +41,8 @@ func (r *RedisClient) PutObject(ctx context.Context, key string, target any, exp
 	return r.SetEx(ctx, key, string(str), expiration).Err()
 }
 
-func NewData(cfg *conf.Config, rdb *RedisClient) *Data {
-	masterDB, err := gorm.Open(mysql.Open(cfg.Data.DB.DSN()), &gorm.Config{
+func NewData(cfg *conf.Bootstrap, rdb *RedisClient) *Data {
+	masterDB, err := gorm.Open(mysql.Open(cfg.GetData().GetDb().DSN()), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
 		Logger:                                   logger.Default.LogMode(logger.Info),
 	})
@@ -56,10 +56,10 @@ func NewData(cfg *conf.Config, rdb *RedisClient) *Data {
 	}
 }
 
-func NewRedisClient(cfg *conf.Config) *redis.Client {
+func NewRedisClient(cfg *conf.Bootstrap) *redis.Client {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Data.Redis.Addr(),
-		Password: cfg.Data.Redis.Password,
+		Addr:     cfg.GetData().GetRedis().Addr(),
+		Password: cfg.GetData().GetRedis().GetPassword(),
 		DB:       0,
 	})
 	return rdb

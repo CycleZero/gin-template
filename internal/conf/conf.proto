@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package conf;
+
+option go_package = "gin-template/internal/conf;conf";
+
+// Bootstrap 应用配置根节点，与 config.yaml 结构一一对应。
+//
+// key 与字段名保持一致：protojson 同时接受「原始字段名」与 lowerCamelCase，
+// 因此 YAML 里现有的 snake_case 写法（如 db_name、enable_db_debug）无需修改。
+message Bootstrap {
+  Data data = 1;
+  Server server = 2;
+  Log log = 3;
+  App app = 4;
+}
+
+// Data 数据层配置。
+message Data {
+  DB db = 1;
+  Redis redis = 2;
+}
+
+// DB MySQL 配置。
+message DB {
+  string host = 1;
+  int32 port = 2;
+  string user = 3;
+  string password = 4;
+  string db_name = 5;
+}
+
+// Redis 缓存配置。
+message Redis {
+  string host = 1;
+  int32 port = 2;
+  string password = 3;
+}
+
+// Server 服务端配置。
+message Server {
+  HTTP http = 1;
+}
+
+// HTTP HTTP 服务配置。
+message HTTP {
+  string host = 1;
+  uint32 port = 2;
+  Pprof pprof = 3;
+}
+
+// Pprof 性能分析配置。
+message Pprof {
+  bool enable = 1;
+  string host = 2;
+  uint32 port = 3;
+}
+
+// Log 日志配置。
+message Log {
+  string mode = 1;  // dev | prod
+  string level = 2; // debug | info | warn | error
+  string dir = 3;   // 日志目录，留空则只输出到控制台
+}
+
+// App 应用配置。
+message App {
+  bool dev_mode = 1;
+  bool enable_db_debug = 2;
+}
