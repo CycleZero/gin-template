@@ -27,14 +27,11 @@ func NewDemoRepo(infraData *infra.Data) biz.DemoRepo {
 	return &demoRepo{db: infraData.DB, infraData: infraData}
 }
 
-// Create 写入一条记录；成功后把自增主键与时间戳回填到领域模型。
+// Create 写入一条记录；成功后把数据库生成的字段（自增主键、时间戳）回填到领域模型。
+//
+// 新建记录的 ID/CreatedAt/UpdatedAt 为零值，由 GORM 填充（见 fromBiz 的说明）。
 func (r *demoRepo) Create(ctx context.Context, demo *biz.Demo) error {
-	po := &Demo{
-		Name:        demo.Name,
-		Description: demo.Description,
-		Status:      demo.Status,
-		CreatedBy:   demo.CreatedBy,
-	}
+	po := fromBiz(demo)
 	if err := r.db.WithContext(ctx).Create(po).Error; err != nil {
 		return err
 	}
@@ -82,20 +79,25 @@ func (r *demoRepo) List(ctx context.Context, page, pageSize int) ([]*biz.Demo, i
 	return demos, total, nil
 }
 
-// Update 按主键更新可变字段。
+// Update 按主键**全字段**写回领域模型（GORM Save 会更新所有字段，含零值字段）。
 //
-// 领域模型 → PO 的转换集中在 applyBiz，避免字段映射散落在各方法里。
+// 期望传入的是 biz 从仓储读出的完整领域模型（GetByID / List 的产物）；
+// created_at 等审计字段随之原样回写，不做裁剪。
 func (r *demoRepo) Update(ctx context.Context, demo *biz.Demo) error {
-	var po Demo
-	if err := r.db.WithContext(ctx).First(&po, demo.ID).Error; err != nil {
+	// 先确认记录存在（未命中返回领域错误），并保留软删除标记
+	var existing Demo
+	if err := r.db.WithContext(ctx).First(&existing, demo.ID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return biz.ErrDemoNotFound
 		}
 		return err
 	}
 
-	po.applyBiz(demo)
-	if err := r.db.WithContext(ctx).Save(&po).Error; err != nil {
+	po := fromBiz(demo)
+	// deleted_at 是仓储侧的软删除状态，不属于领域模型，按库中原值保留
+	po.DeletedAt = existing.DeletedAt
+
+	if err := r.db.WithContext(ctx).Save(po).Error; err != nil {
 		return err
 	}
 
@@ -115,7 +117,11 @@ func (r *demoRepo) Delete(ctx context.Context, id uint) error {
 	return nil
 }
 
-// toBiz 把数据库模型转换为领域模型。
+// ============================================================
+// PO ↔ 领域模型转换（data 层的职责）
+// ============================================================
+
+// toBiz 把数据库模型转换为领域模型（逐字段 1:1）。
 func (d *Demo) toBiz() *biz.Demo {
 	return &biz.Demo{
 		ID:          d.ID,
@@ -128,9 +134,26 @@ func (d *Demo) toBiz() *biz.Demo {
 	}
 }
 
-// applyBiz 把领域模型的可变字段写回数据库模型（不改主键与创建信息）。
-func (d *Demo) applyBiz(src *biz.Demo) {
-	d.Name = src.Name
-	d.Description = src.Description
-	d.Status = src.Status
+// fromBiz 把领域模型**完整**转换为数据库模型。
+//
+// 忠实映射：biz.Demo 上的每个字段都 1:1 写入 PO，不做字段裁剪——
+// 这样领域模型新增字段时只需改这一处，不会出现"某个字段被静默丢弃"。
+//
+// 唯一不来自领域模型的是 deleted_at（软删除是仓储侧状态，由调用方在 Update 中保留原值）。
+// created_at 随领域模型原样回写：新建时为零值 → 由 GORM 自动填充；更新时传入的是已加载的
+// 完整模型，因此是原值回写而非清零。
+// updated_at 虽然也在此映射，但更新时会被 GORM 的 autoUpdateTime 改写为当前时间，
+// 写入后由 Update 回填到领域模型。
+func fromBiz(src *biz.Demo) *Demo {
+	return &Demo{
+		Model: gorm.Model{
+			ID:        src.ID,
+			CreatedAt: src.CreatedAt,
+			UpdatedAt: src.UpdatedAt,
+		},
+		Name:        src.Name,
+		Description: src.Description,
+		Status:      src.Status,
+		CreatedBy:   src.CreatedBy,
+	}
 }
