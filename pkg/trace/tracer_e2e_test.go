@@ -102,15 +102,37 @@ func TestOTLPTraceEndToEndHTTP(t *testing.T) {
 	}
 }
 
-// TestInitDisabledIsGraceful 无端点且无额外 processor 时应优雅跳过，Shutdown(nil) 为空操作。
-func TestInitDisabledIsGraceful(t *testing.T) {
-	provider, err := Init(Config{Service: otelx.ServiceInfo{Name: "disabled"}})
+// TestInitWithoutEndpointStillProvidesTraceID 未配置 OTLP 端点时也必须能拿到 TraceID。
+//
+// 本项目的"请求 ID"就是 TraceID，因此 Provider 不能为 nil：
+// 未配置端点时用 NeverSample + 无导出器，不记录/不导出 span，但 TraceID 依然生成。
+func TestInitWithoutEndpointStillProvidesTraceID(t *testing.T) {
+	provider, err := Init(Config{Service: otelx.ServiceInfo{Name: "no-endpoint"}})
 	if err != nil {
 		t.Fatalf("未配置端点不应报错：%v", err)
 	}
-	if provider != nil {
-		t.Error("未配置端点且无 processor 时应返回 nil provider")
+	if provider == nil {
+		t.Fatal("未配置端点也必须返回可用 Provider（请求 ID 依赖 TraceID）")
 	}
+	defer func() {
+		if err := Shutdown(context.Background(), provider); err != nil {
+			t.Errorf("Shutdown 失败：%v", err)
+		}
+	}()
+
+	ctx, span := otel.Tracer("test").Start(context.Background(), "op")
+	span.End()
+
+	if got := TraceID(ctx); got == "" {
+		t.Error("无端点场景下 TraceID 不应为空（NeverSample 仍应生成合法 TraceID）")
+	}
+	if got := TraceID(context.Background()); got != "" {
+		t.Errorf("无 span 的 ctx 不应返回 TraceID，实际：%q", got)
+	}
+}
+
+// TestShutdownNilProvider Shutdown(nil) 应为空操作（防御性）。
+func TestShutdownNilProvider(t *testing.T) {
 	if err := Shutdown(context.Background(), nil); err != nil {
 		t.Errorf("Shutdown(nil) 应为空操作，实际：%v", err)
 	}

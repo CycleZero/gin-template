@@ -28,12 +28,3 @@ func (x *Bootstrap) OtelServiceInfo(instanceID string) otelx.ServiceInfo {
 		Environment: o.GetEnvironment(),
 	}
 }
-
-// OtelEnabled 报告是否至少配置了一个 OTLP 端点。
-//
-// 用于决定是否挂载 HTTP 埋点中间件：未配置端点时保持零开销，
-// 与"不配置即关闭上报"的默认行为一致。
-func (x *Bootstrap) OtelEnabled() bool {
-	o := x.GetOtel()
-	return o.GetEndpoint() != "" || o.GetMetricsEndpoint() != "" || o.GetLogsEndpoint() != ""
-}

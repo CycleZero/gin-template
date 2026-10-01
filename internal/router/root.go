@@ -22,6 +22,7 @@ func RegisterRouter(root gin.IRouter, serviceHub *domain.ServiceHub) {
 	}
 
 	// 全局中间件
+	root.Use(middleware.TraceID()) // 回写响应头 X-Request-ID（值 = 链路 TraceID）
 	root.Use(middleware.CORS())
 	root.Use(middleware.AddMetaData())
 

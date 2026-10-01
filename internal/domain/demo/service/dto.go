@@ -34,18 +34,14 @@ type DemoResponse struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-// ListDemoResponse 列表响应
+// ListDemoResponse 列表响应（data 载荷；外层信封由 pkg/response 统一封装）
 type ListDemoResponse struct {
 	List  []*DemoResponse `json:"list"`
 	Total int64           `json:"total"`
 	Page  int             `json:"page"`
 }
 
-// ============================================================
-// biz 领域模型 ↔ DTO 转换（service 层的职责）
-// ============================================================
-
-// newDemoResponse 把 biz 领域模型转换为响应 DTO。
+// newDemoResponse 把 biz 领域模型转换为响应 DTO —— 这就是"service 层负责 biz ↔ DTO 转换"。
 //
 // 时间统一格式化为字符串（对外契约），不把 time.Time 直接暴露出去。
 func newDemoResponse(d *biz.Demo) *DemoResponse {
@@ -60,18 +56,5 @@ func newDemoResponse(d *biz.Demo) *DemoResponse {
 		CreatedBy:   d.CreatedBy,
 		CreatedAt:   d.CreatedAt.Format("2006-01-02 15:04:05"),
 		UpdatedAt:   d.UpdatedAt.Format("2006-01-02 15:04:05"),
-	}
-}
-
-// newListDemoResponse 批量转换列表响应。
-func newListDemoResponse(demos []*biz.Demo, total int64, page int) ListDemoResponse {
-	list := make([]*DemoResponse, 0, len(demos))
-	for _, d := range demos {
-		list = append(list, newDemoResponse(d))
-	}
-	return ListDemoResponse{
-		List:  list,
-		Total: total,
-		Page:  page,
 	}
 }

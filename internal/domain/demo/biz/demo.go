@@ -2,15 +2,16 @@ package biz
 
 import (
 	"context"
-	"errors"
 	"time"
+
+	"gin-template/pkg/errs"
 )
 
 // ErrDemoNotFound 领域错误：记录不存在。
 //
-// 由 data 层在查询不到记录时返回，service 层用 errors.Is 判断并映射为 404。
-// 领域错误定义在 biz 层，使上层不必依赖具体的存储错误（如 gorm.ErrRecordNotFound）。
-var ErrDemoNotFound = errors.New("demo not found")
+// 由 data 层在查询不到记录时返回。service 层无需再判断类型——
+// pkg/response 会依据 errs.Error 携带的状态码与业务码渲染响应（404 / 40400）。
+var ErrDemoNotFound = errs.NotFound("记录不存在")
 
 // Demo 是 demo 模块的**领域模型**（业务模型）。
 //
@@ -40,4 +41,16 @@ type DemoRepo interface {
 	List(ctx context.Context, page, pageSize int) ([]*Demo, int64, error)
 	Update(ctx context.Context, demo *Demo) error
 	Delete(ctx context.Context, id uint) error
+}
+
+// wrapInternal 把基础设施错误归一化为统一的内部错误。
+//
+// 已经是 *errs.Error 的错误（含领域错误 ErrDemoNotFound）原样返回，
+// 保留其业务码与 HTTP 状态码；其余（SQL/网络错误）包装为 500，
+// 细节只进日志、不进入响应体（见 pkg/errs.Resolve 的兜底规则）。
+func wrapInternal(message string, err error) error {
+	if _, ok := errs.As(err); ok {
+		return err
+	}
+	return errs.Internal(message).WithCause(err)
 }

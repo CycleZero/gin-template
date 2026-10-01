@@ -2,7 +2,7 @@
 //
 // 职责：
 //   - 定义领域模型（demo.go 的 Demo）与仓储接口（DemoRepo）——依赖倒置
-//   - 编排业务流程、执行业务规则，返回领域模型或领域错误
+//   - 编排业务流程、执行业务规则，返回领域模型或**领域错误**（pkg/errs）
 //
 // 约束：只依赖标准库与仓储**接口**，不 import data，也不感知 HTTP，
 // 因此同一份业务可被 HTTP / gRPC / 定时任务等复用，并可注入假仓储做单元测试。
@@ -37,24 +37,30 @@ func (b *DemoBiz) Create(ctx context.Context, name, description string, createdB
 	}
 	if err := b.repo.Create(ctx, demo); err != nil {
 		b.logger.ErrorContext(ctx, "创建 Demo 失败", "error", err)
-		return nil, err
+		return nil, wrapInternal("创建 Demo 失败", err)
 	}
 	return demo, nil
 }
 
-// GetByID 获取单条记录；不存在时返回 ErrDemoNotFound。
+// GetByID 获取单条记录；不存在时返回领域错误 ErrDemoNotFound
+// （wrapInternal 会原样放行，最终映射为 404）。
 func (b *DemoBiz) GetByID(ctx context.Context, id uint) (*Demo, error) {
 	demo, err := b.repo.GetByID(ctx, id)
 	if err != nil {
 		b.logger.ErrorContext(ctx, "获取 Demo 失败", "error", err, "id", id)
-		return nil, err
+		return nil, wrapInternal("查询 Demo 失败", err)
 	}
 	return demo, nil
 }
 
 // List 分页获取记录。
 func (b *DemoBiz) List(ctx context.Context, page, pageSize int) ([]*Demo, int64, error) {
-	return b.repo.List(ctx, page, pageSize)
+	demos, total, err := b.repo.List(ctx, page, pageSize)
+	if err != nil {
+		b.logger.ErrorContext(ctx, "查询 Demo 列表失败", "error", err, "page", page, "page_size", pageSize)
+		return nil, 0, wrapInternal("查询 Demo 列表失败", err)
+	}
+	return demos, total, nil
 }
 
 // Update 更新记录：先取出领域模型，改字段后再交给仓储持久化。
@@ -62,19 +68,23 @@ func (b *DemoBiz) Update(ctx context.Context, id uint, name, description string)
 	demo, err := b.repo.GetByID(ctx, id)
 	if err != nil {
 		b.logger.ErrorContext(ctx, "获取 Demo 失败", "error", err, "id", id)
-		return nil, err
+		return nil, wrapInternal("查询 Demo 失败", err)
 	}
 
 	demo.Name = name
 	demo.Description = description
 	if err := b.repo.Update(ctx, demo); err != nil {
 		b.logger.ErrorContext(ctx, "更新 Demo 失败", "error", err, "id", id)
-		return nil, err
+		return nil, wrapInternal("更新 Demo 失败", err)
 	}
 	return demo, nil
 }
 
 // Delete 删除记录。
 func (b *DemoBiz) Delete(ctx context.Context, id uint) error {
-	return b.repo.Delete(ctx, id)
+	if err := b.repo.Delete(ctx, id); err != nil {
+		b.logger.ErrorContext(ctx, "删除 Demo 失败", "error", err, "id", id)
+		return wrapInternal("删除 Demo 失败", err)
+	}
+	return nil
 }

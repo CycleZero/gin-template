@@ -22,8 +22,10 @@ server:
     host: "${HTTP_HOST:0.0.0.0}"
     port: "${HTTP_PORT:8000}"
     pprof:
-      enable: "${PPROF_ENABLE:true}"
-      host: "${PPROF_HOST:0.0.0.0}"
+      # 性能分析：只在**独立端口**提供，绝不挂到业务端口（enable=true 但 port=0 会跳过）。
+      # 它能读取进程内存（含堆上的令牌/密钥），生产请只监听本机或内网地址。
+      enable: "${PPROF_ENABLE:false}"
+      host: "${PPROF_HOST:127.0.0.1}"
       port: "${PPROF_PORT:6060}"
 
 log:

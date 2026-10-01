@@ -23,11 +23,13 @@
 gin-template/
 ├── cmd/
 │   └── main/                   # 程序入口（package main）
-│       ├── main.go             # 启动、信号处理
+│       ├── main.go             # 启动、信号处理（SIGINT/SIGTERM）与优雅停机
+│       ├── telemetry.go        # 配置 → log/trace/metrics 的映射
 │       └── wire.go / wire_gen.go  # Wire 依赖注入
 ├── makefile                    # 构建命令
 ├── buf.yaml / buf.gen.yaml     # protobuf 模块与代码生成配置
 ├── config.yaml.example         # 配置文件示例
+├── LICENSE                     # MIT
 │
 ├── pkg/                        # 可复用基础设施
 │   ├── log/                    # 日志模块（slog 门面 + zap 后端）
@@ -41,24 +43,29 @@ gin-template/
 │   │   ├── endpoint.go         # OTLP 端点规范化（三信号共用）
 │   │   └── resource.go         # ServiceInfo → Resource（三信号统一身份）
 │   ├── trace/                  # trace 接入
-│   │   ├── tracer.go           # OTLP 主动推送 + 采样 + W3C 传播器
+│   │   ├── tracer.go           # 始终安装 Provider（无端点则 NeverSample）+ 采样 + 传播器
+│   │   ├── requestid.go        # 请求 ID = TraceID 的取值来源与响应头常量
 │   │   ├── gin.go              # Gin HTTP 埋点（server span + http.server.* 指标）
 │   │   └── redis.go            # go-redis Hook（命令级 span + 耗时指标）
 │   ├── metrics/                # metrics 接入
 │   │   └── metrics.go          # OTLP 周期推送 + Go runtime 指标
+│   ├── errs/                   # 统一错误体系（业务码 + HTTP 状态码 + 对外消息）
+│   ├── response/               # 统一响应封装（响应信封 + 分页 + trace_id）
 │   └── infra/                  # 基础设施层
 │       ├── provider.go         # Wire ProviderSet
-│       └── data.go             # MySQL + Redis 初始化
+│       └── data.go             # MySQL + Redis 初始化 + 连接池 + Health/Close
 │
 ├── internal/                   # 内部模块
-│   ├── app.go                  # 应用封装（Gin Engine，package internal）
+│   ├── app.go                  # 应用封装：中间件装配 + Start/Shutdown（优雅停机）
+│   ├── server.go               # http.Server 封装（超时预算 + 优雅停机）
+│   ├── debug.go                # pprof 调试服务（按配置，独立端口）
 │   ├── provider.go             # 内部 Wire 聚合
 │   ├── conf/                   # 配置模块
 │   │   ├── conf.proto          # 配置结构定义（protobuf，唯一真相源）
 │   │   ├── conf.pb.go          # buf 生成（make config），入库以保证无工具链可构建
 │   │   └── config.go           # Kratos config 加载（file + env source）+ DSN/Addr/Validate
 │   ├── common/                 # 公共组件
-│   │   └── request_meta.go     # 请求元数据
+│   │   └── request_meta.go     # 请求元数据（含 TraceID）
 │   ├── domain/                 # 业务领域（DDD 分层）
 │   │   ├── hub.go              # ServiceHub 服务聚合
 │   │   ├── provider.go         # Domain Wire 聚合
@@ -70,10 +77,12 @@ gin-template/
 │   └── router/                 # 路由层
 │       ├── provider.go         # 中间件注册
 │       ├── root.go             # 路由注册
+│       ├── health.go           # /healthz 存活探针与 /readyz 就绪探针
 │       └── middleware/         # 中间件
 │           ├── cors.go         # 跨域处理
 │           ├── auth.go         # JWT 认证
-│           └── metadata.go     # 请求元数据
+│           ├── traceid.go      # 回写响应头 X-Request-ID（值 = 链路 TraceID）
+│           └── metadata.go     # 请求元数据（客户端 IP/UA/TraceID）
 ```
 
 ## 分层架构
@@ -115,6 +124,88 @@ internal/domain/<svc>/
   映射为 404 —— 上层不依赖 `gorm.ErrRecordNotFound` 这类存储细节。
 - `context.Context` 从 `c.Request.Context()` 一路向下传递，链路追踪（OTel）与事务
   （[pkg/tx](pkg/tx/tx.go)）都能沿 ctx 传播。
+
+## HTTP 契约与错误码
+
+所有接口（成功与失败）返回同一信封，前端只需一套解析逻辑：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": { "id": 1 },
+  "trace_id": "5f0af201e4905c0eeab1603c31ab1540"
+}
+```
+
+- **成功**：`response.OK(c, data)`；分页用 `response.OKPage(c, list, total, page, pageSize)`（空列表序列化为 `[]`）
+- **失败**：`response.Fail(c, err)` —— 状态码、业务码与对外消息都由 [pkg/errs](pkg/errs/errs.go) 统一映射，handler 里不再写分支
+
+业务码沿用 `HTTP 状态码 × 100`：`40000` 参数错误、`40100` 未认证、`40300` 无权限、`40400` 不存在、`40900` 冲突、`42900` 限流、`50000` 内部错误、`50300` 依赖不可用、`50400` 超时。
+
+错误分层约定：
+
+| 层 | 责任 |
+|---|---|
+| `data/` | 把存储错误翻译成**领域错误**（如 `biz.ErrDemoNotFound = errs.NotFound("记录不存在")`），上层不认识 `gorm.ErrRecordNotFound` |
+| `biz/` | 定义领域错误；基础设施错误用 `errs.Internal(...).WithCause(err)` 归一化（cause 只进日志） |
+| `service/` | 只调用 `response.Fail(c, err)`，不判断错误类型 |
+
+未归一化的 error 一律按 `500` + 固定文案返回，**绝不透出 SQL/DSN 等内部细节**（`pkg/errs`、`pkg/response` 有测试锁死这条）。
+
+### 请求 ID = TraceID
+
+不再单独生成请求 ID：**请求 ID 就是链路 TraceID**，四个位置天然同源：
+
+| 位置 | 内容 |
+|---|---|
+| 响应头 `X-Request-ID` | TraceID（`middleware.TraceID` 回写） |
+| 响应体 `trace_id` | TraceID（`pkg/response`） |
+| 日志字段 `trace.id` | TraceID（`log.WithContext`） |
+| 链路系统 | 同一个 TraceID |
+
+- 上游若传 `traceparent`，TraceID 由 W3C 传播器续接，跨服务链路不断（有测试覆盖）。
+- **未配置 `otel.endpoint` 时也必须有 TraceID**：`trace.Init` 始终安装 Provider（无端点则 `NeverSample` + 无导出器），因此请求 ID 在纯本地开发环境同样可用。
+- 客户端只需拿响应头，即可在日志/链路平台检索整条请求。
+
+## 健康检查、pprof 与优雅停机
+
+### 探针
+
+| 路径 | 语义 | 行为 |
+|---|---|---|
+| `GET /healthz` | 存活探针（liveness） | 进程能响应即 200，**不检查依赖**（依赖抖动不应导致容器被反复重启） |
+| `GET /readyz` | 就绪探针（readiness） | 探测 MySQL/Redis，不可用返回 503（K8s 摘除流量但不重启容器） |
+
+两者都返回统一信封，并带 `trace_id` 便于对齐排查。
+
+### pprof（按配置、独立端口）
+
+```yaml
+server:
+  http:
+    pprof:
+      enable: true
+      host: 127.0.0.1   # 生产建议只监听本机/内网
+      port: 6060
+```
+
+- **只在独立端口提供**，绝不挂到业务端口（pprof 能读进程内存，暴露等于信息泄露面）。
+- `enable: true` 但 `port` 为 0 时**跳过并告警**，不会退化到业务端口。
+- 基于标准库 `net/http/pprof`，因此不再依赖 `gin-contrib/pprof`。
+
+### 优雅停机
+
+`main` 监听 `SIGINT` 与 `SIGTERM`（K8s 停止容器发的是 SIGTERM），收到信号后按依赖顺序收尾：
+
+```
+停止接收新连接 → 排空在途请求（超时 5s）→ 关闭 pprof → 释放 MySQL/Redis
+  → flush trace/metrics → 关闭日志 → 关闭配置来源
+```
+
+- HTTP 超时预算：`ReadHeaderTimeout 10s` / `ReadTimeout 30s` / `WriteTimeout 60s` / `IdleTimeout 120s`
+  （零值即"永不超时"，一个慢客户端就能长期占住连接）。
+- 在途请求会被**排空**而不是掐断（`internal/server_test.go` 专门验证了这条语义）。
 
 ## 日志
 
@@ -238,7 +329,8 @@ make run
 
 服务启动后访问：
 - API: `http://localhost:8000/api/demo`
-- pprof: `http://localhost:6060/debug/pprof/`
+- 健康检查: `http://localhost:8000/healthz`、`http://localhost:8000/readyz`
+- pprof: `http://localhost:6060/debug/pprof/`（需开启 `server.http.pprof.enable`）
 
 ## 配置说明
 
@@ -293,9 +385,9 @@ server:
   http:
     host: "${HTTP_HOST:0.0.0.0}"
     port: "${HTTP_PORT:8000}"
-    pprof:             # 性能分析
-      enable: "${PPROF_ENABLE:true}"
-      host: "${PPROF_HOST:0.0.0.0}"
+    pprof:             # 性能分析（仅在独立端口提供，默认关闭）
+      enable: "${PPROF_ENABLE:false}"
+      host: "${PPROF_HOST:127.0.0.1}"
       port: "${PPROF_PORT:6060}"
 
 log:

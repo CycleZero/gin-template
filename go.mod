@@ -4,7 +4,6 @@ go 1.27.1
 
 require (
 	github.com/fatih/color v1.19.0
-	github.com/gin-contrib/pprof v1.5.6
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-kratos/kratos/v3 v3.0.0
 	github.com/golang-jwt/jwt/v5 v5.3.1

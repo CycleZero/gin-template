@@ -3,18 +3,18 @@
 // 职责：
 //   - 解析请求、校验参数（DTO 定义见 dto.go）
 //   - 调用 biz 用例，并把 biz 领域模型转换为响应 DTO（转换函数也在 dto.go）
-//   - 把领域错误映射为 HTTP 状态码
+//   - 用 pkg/response 渲染响应：成功 OK/OKPage，失败 Fail（状态码与业务码由 pkg/errs 统一映射）
 //
 // 约束：只依赖 biz，**不 import data**——HTTP 层不会泄漏数据库模型。
 package service
 
 import (
-	"errors"
 	"log/slog"
-	"net/http"
 	"strconv"
 
 	"gin-template/internal/domain/demo/biz"
+	"gin-template/pkg/errs"
+	"gin-template/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,17 +46,17 @@ func (s *DemoService) Create(c *gin.Context) {
 	var req CreateDemoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		s.logger.ErrorContext(ctx, "解析创建请求失败", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+		response.Fail(c, errs.InvalidArgument("请求参数错误"))
 		return
 	}
 
 	demo, err := s.demoBiz.Create(ctx, req.Name, req.Description, 0)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建失败"})
+		response.Fail(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, newDemoResponse(demo))
+	response.OK(c, newDemoResponse(demo))
 }
 
 // GetByID 获取 Demo 详情
@@ -67,26 +67,21 @@ func (s *DemoService) Create(c *gin.Context) {
 // @Success 200 {object} DemoResponse
 // @Router /api/demo/{id} [get]
 func (s *DemoService) GetByID(c *gin.Context) {
-	ctx := c.Request.Context()
-
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID 格式错误"})
+		response.Fail(c, errs.InvalidArgument("ID 格式错误"))
 		return
 	}
 
-	demo, err := s.demoBiz.GetByID(ctx, uint(id))
+	// 领域错误（如 ErrDemoNotFound → 404）由 response.Fail 统一映射，
+	// handler 里不再出现 if errors.Is(...) 分支。
+	demo, err := s.demoBiz.GetByID(c.Request.Context(), uint(id))
 	if err != nil {
-		// 领域错误 → HTTP 状态码的映射只发生在 service 层
-		if errors.Is(err, biz.ErrDemoNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		response.Fail(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, newDemoResponse(demo))
+	response.OK(c, newDemoResponse(demo))
 }
 
 // List 获取 Demo 列表
@@ -98,11 +93,9 @@ func (s *DemoService) GetByID(c *gin.Context) {
 // @Success 200 {object} ListDemoResponse
 // @Router /api/demo [get]
 func (s *DemoService) List(c *gin.Context) {
-	ctx := c.Request.Context()
-
 	var req ListDemoRequest
 	if err := c.ShouldBindQuery(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+		response.Fail(c, errs.InvalidArgument("请求参数错误"))
 		return
 	}
 
@@ -115,13 +108,17 @@ func (s *DemoService) List(c *gin.Context) {
 		pageSize = 10
 	}
 
-	demos, total, err := s.demoBiz.List(ctx, page, pageSize)
+	demos, total, err := s.demoBiz.List(c.Request.Context(), page, pageSize)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		response.Fail(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, newListDemoResponse(demos, total, page))
+	responses := make([]*DemoResponse, 0, len(demos))
+	for _, d := range demos {
+		responses = append(responses, newDemoResponse(d))
+	}
+	response.OKPage(c, responses, total, page, pageSize)
 }
 
 // Update 更新 Demo
@@ -134,31 +131,25 @@ func (s *DemoService) List(c *gin.Context) {
 // @Success 200 {object} DemoResponse
 // @Router /api/demo/{id} [put]
 func (s *DemoService) Update(c *gin.Context) {
-	ctx := c.Request.Context()
-
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID 格式错误"})
+		response.Fail(c, errs.InvalidArgument("ID 格式错误"))
 		return
 	}
 
 	var req UpdateDemoRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+		response.Fail(c, errs.InvalidArgument("请求参数错误"))
 		return
 	}
 
-	demo, err := s.demoBiz.Update(ctx, uint(id), req.Name, req.Description)
+	demo, err := s.demoBiz.Update(c.Request.Context(), uint(id), req.Name, req.Description)
 	if err != nil {
-		if errors.Is(err, biz.ErrDemoNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新失败"})
+		response.Fail(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, newDemoResponse(demo))
+	response.OK(c, newDemoResponse(demo))
 }
 
 // Delete 删除 Demo
@@ -169,22 +160,16 @@ func (s *DemoService) Update(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Router /api/demo/{id} [delete]
 func (s *DemoService) Delete(c *gin.Context) {
-	ctx := c.Request.Context()
-
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ID 格式错误"})
+		response.Fail(c, errs.InvalidArgument("ID 格式错误"))
 		return
 	}
 
-	if err := s.demoBiz.Delete(ctx, uint(id)); err != nil {
-		if errors.Is(err, biz.ErrDemoNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "记录不存在"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败"})
+	if err := s.demoBiz.Delete(c.Request.Context(), uint(id)); err != nil {
+		response.Fail(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+	response.OK(c, gin.H{"message": "删除成功"})
 }
