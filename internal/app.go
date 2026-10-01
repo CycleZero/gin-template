@@ -8,6 +8,7 @@ import (
 	"gin-template/internal/domain"
 	"gin-template/internal/router"
 	"gin-template/pkg/infra"
+	"gin-template/pkg/trace"
 
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,12 @@ func NewMainApp(
 
 	// 注册自定义中间件（必须在路由注册前完成）
 	registeredMiddleWire.Register()
+
+	// OTel HTTP 埋点：为每个请求产生 server span，并记录 http.server.* 指标。
+	// 未配置 OTLP 端点时不挂载，保持"不配置即零开销"。
+	if cfg.OtelEnabled() {
+		e.Use(trace.Middleware(cfg.ServiceName()))
+	}
 
 	// 注册 pprof（性能分析）
 	pprof.Register(e)

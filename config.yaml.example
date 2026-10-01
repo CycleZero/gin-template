@@ -34,3 +34,22 @@ log:
 app:
   dev_mode: "${DEV_MODE:true}"
   enable_db_debug: "${ENABLE_DB_DEBUG:true}"
+
+# 可观测性：OTLP/HTTP 主动推送，一个端点同时驱动 trace / metrics / logs
+# （仅 exporter 默认路径不同：/v1/traces、/v1/metrics、/v1/logs）。
+#
+# endpoint 留空 = 全部关闭上报（默认，零开销）。指向任一 OTLP 兼容后端即可：
+#   otel-collector: http://127.0.0.1:4318
+#   SigNoz / Jaeger / Tempo / Grafana Alloy 等
+otel:
+  endpoint: "${OTEL_ENDPOINT:}"                    # 如 http://127.0.0.1:4318
+  insecure: "${OTEL_INSECURE:true}"                # 明文传输；endpoint 带 http:// 时自动为 true
+  service_name: "${OTEL_SERVICE_NAME:gin-template}"
+  service_version: "${OTEL_SERVICE_VERSION:v0.0.0}"
+  environment: "${OTEL_ENVIRONMENT:development}"
+  trace_sample_rate: "${OTEL_TRACE_SAMPLE_RATE:1.0}"      # 0.0-1.0，0 视为 1.0（全量）
+  metrics_interval_seconds: "${OTEL_METRICS_INTERVAL:15}" # 指标推送周期
+  # metrics_endpoint: ""   # 可选：把 metrics 单独指向别的后端（为空则由 endpoint 派生）
+  # logs_endpoint: ""      # 可选：把 logs 单独指向别的后端
+  # headers:               # 可选：额外请求头（如 ingestion key，建议来自环境变量）
+  #   x-ingestion-key: "${OTEL_INGESTION_KEY:}"

@@ -7,6 +7,7 @@ import (
 
 	"gin-template/internal/conf"
 	"gin-template/pkg/log"
+	"gin-template/pkg/trace"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/mysql"
@@ -62,7 +63,9 @@ func NewRedisClient(cfg *conf.Bootstrap) *redis.Client {
 		Password: cfg.GetData().GetRedis().GetPassword(),
 		DB:       0,
 	})
-	return rdb
+	// Redis 命令级 span 与耗时指标：以 Hook 方式挂载，不改动任何调用方代码；
+	// OTel Provider 未启用时开销趋近于零。
+	return trace.HookRedis(rdb)
 }
 
 func NewCustomRedisClient(rdb *redis.Client) *RedisClient {

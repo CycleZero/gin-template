@@ -31,6 +31,7 @@ type Bootstrap struct {
 	Server        *Server                `protobuf:"bytes,2,opt,name=server,proto3" json:"server,omitempty"`
 	Log           *Log                   `protobuf:"bytes,3,opt,name=log,proto3" json:"log,omitempty"`
 	App           *App                   `protobuf:"bytes,4,opt,name=app,proto3" json:"app,omitempty"`
+	Otel          *Otel                  `protobuf:"bytes,5,opt,name=otel,proto3" json:"otel,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -93,6 +94,134 @@ func (x *Bootstrap) GetApp() *App {
 	return nil
 }
 
+func (x *Bootstrap) GetOtel() *Otel {
+	if x != nil {
+		return x.Otel
+	}
+	return nil
+}
+
+// Otel 可观测性配置：一个端点同时驱动 trace / metrics / logs 三路 OTLP/HTTP 主动推送。
+//
+// 三类信号仅是 exporter 默认路径不同（/v1/traces、/v1/metrics、/v1/logs），
+// 因此共用一个 host:port 即可；metrics_endpoint / logs_endpoint 仅作逃生口。
+// endpoint 为空表示关闭全部 OTLP 上报（默认状态，安全）。
+type Otel struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Endpoint               string                 `protobuf:"bytes,1,opt,name=endpoint,proto3" json:"endpoint,omitempty"`                                                                         // OTLP/HTTP 端点：host:port 或 http(s)://host:port；空值=关闭
+	Insecure               bool                   `protobuf:"varint,2,opt,name=insecure,proto3" json:"insecure,omitempty"`                                                                        // 明文传输；endpoint 带 http:// 时自动为 true
+	Headers                map[string]string      `protobuf:"bytes,3,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // 额外请求头（如 ingestion key，建议来自环境变量）
+	ServiceName            string                 `protobuf:"bytes,4,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`                                                // service.name，缺省为 gin-template
+	ServiceVersion         string                 `protobuf:"bytes,5,opt,name=service_version,json=serviceVersion,proto3" json:"service_version,omitempty"`                                       // service.version，建议由 -ldflags 注入
+	Environment            string                 `protobuf:"bytes,6,opt,name=environment,proto3" json:"environment,omitempty"`                                                                   // deployment.environment，如 production
+	TraceSampleRate        float64                `protobuf:"fixed64,7,opt,name=trace_sample_rate,json=traceSampleRate,proto3" json:"trace_sample_rate,omitempty"`                                // 采样率 0.0-1.0，0 视为 1.0
+	MetricsEndpoint        string                 `protobuf:"bytes,8,opt,name=metrics_endpoint,json=metricsEndpoint,proto3" json:"metrics_endpoint,omitempty"`                                    // 可选：metrics 专用端点覆盖
+	LogsEndpoint           string                 `protobuf:"bytes,9,opt,name=logs_endpoint,json=logsEndpoint,proto3" json:"logs_endpoint,omitempty"`                                             // 可选：logs 专用端点覆盖
+	MetricsIntervalSeconds uint32                 `protobuf:"varint,10,opt,name=metrics_interval_seconds,json=metricsIntervalSeconds,proto3" json:"metrics_interval_seconds,omitempty"`           // 指标推送周期，0 视为 15s
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *Otel) Reset() {
+	*x = Otel{}
+	mi := &file_conf_conf_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Otel) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Otel) ProtoMessage() {}
+
+func (x *Otel) ProtoReflect() protoreflect.Message {
+	mi := &file_conf_conf_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Otel.ProtoReflect.Descriptor instead.
+func (*Otel) Descriptor() ([]byte, []int) {
+	return file_conf_conf_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Otel) GetEndpoint() string {
+	if x != nil {
+		return x.Endpoint
+	}
+	return ""
+}
+
+func (x *Otel) GetInsecure() bool {
+	if x != nil {
+		return x.Insecure
+	}
+	return false
+}
+
+func (x *Otel) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *Otel) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
+	}
+	return ""
+}
+
+func (x *Otel) GetServiceVersion() string {
+	if x != nil {
+		return x.ServiceVersion
+	}
+	return ""
+}
+
+func (x *Otel) GetEnvironment() string {
+	if x != nil {
+		return x.Environment
+	}
+	return ""
+}
+
+func (x *Otel) GetTraceSampleRate() float64 {
+	if x != nil {
+		return x.TraceSampleRate
+	}
+	return 0
+}
+
+func (x *Otel) GetMetricsEndpoint() string {
+	if x != nil {
+		return x.MetricsEndpoint
+	}
+	return ""
+}
+
+func (x *Otel) GetLogsEndpoint() string {
+	if x != nil {
+		return x.LogsEndpoint
+	}
+	return ""
+}
+
+func (x *Otel) GetMetricsIntervalSeconds() uint32 {
+	if x != nil {
+		return x.MetricsIntervalSeconds
+	}
+	return 0
+}
+
 // Data 数据层配置。
 type Data struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -104,7 +233,7 @@ type Data struct {
 
 func (x *Data) Reset() {
 	*x = Data{}
-	mi := &file_conf_conf_proto_msgTypes[1]
+	mi := &file_conf_conf_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -116,7 +245,7 @@ func (x *Data) String() string {
 func (*Data) ProtoMessage() {}
 
 func (x *Data) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[1]
+	mi := &file_conf_conf_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -129,7 +258,7 @@ func (x *Data) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Data.ProtoReflect.Descriptor instead.
 func (*Data) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{1}
+	return file_conf_conf_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Data) GetDb() *DB {
@@ -160,7 +289,7 @@ type DB struct {
 
 func (x *DB) Reset() {
 	*x = DB{}
-	mi := &file_conf_conf_proto_msgTypes[2]
+	mi := &file_conf_conf_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -172,7 +301,7 @@ func (x *DB) String() string {
 func (*DB) ProtoMessage() {}
 
 func (x *DB) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[2]
+	mi := &file_conf_conf_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -185,7 +314,7 @@ func (x *DB) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DB.ProtoReflect.Descriptor instead.
 func (*DB) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{2}
+	return file_conf_conf_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *DB) GetHost() string {
@@ -235,7 +364,7 @@ type Redis struct {
 
 func (x *Redis) Reset() {
 	*x = Redis{}
-	mi := &file_conf_conf_proto_msgTypes[3]
+	mi := &file_conf_conf_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -247,7 +376,7 @@ func (x *Redis) String() string {
 func (*Redis) ProtoMessage() {}
 
 func (x *Redis) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[3]
+	mi := &file_conf_conf_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -260,7 +389,7 @@ func (x *Redis) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Redis.ProtoReflect.Descriptor instead.
 func (*Redis) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{3}
+	return file_conf_conf_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Redis) GetHost() string {
@@ -294,7 +423,7 @@ type Server struct {
 
 func (x *Server) Reset() {
 	*x = Server{}
-	mi := &file_conf_conf_proto_msgTypes[4]
+	mi := &file_conf_conf_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -306,7 +435,7 @@ func (x *Server) String() string {
 func (*Server) ProtoMessage() {}
 
 func (x *Server) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[4]
+	mi := &file_conf_conf_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -319,7 +448,7 @@ func (x *Server) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Server.ProtoReflect.Descriptor instead.
 func (*Server) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{4}
+	return file_conf_conf_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Server) GetHttp() *HTTP {
@@ -341,7 +470,7 @@ type HTTP struct {
 
 func (x *HTTP) Reset() {
 	*x = HTTP{}
-	mi := &file_conf_conf_proto_msgTypes[5]
+	mi := &file_conf_conf_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -353,7 +482,7 @@ func (x *HTTP) String() string {
 func (*HTTP) ProtoMessage() {}
 
 func (x *HTTP) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[5]
+	mi := &file_conf_conf_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -366,7 +495,7 @@ func (x *HTTP) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HTTP.ProtoReflect.Descriptor instead.
 func (*HTTP) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{5}
+	return file_conf_conf_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HTTP) GetHost() string {
@@ -402,7 +531,7 @@ type Pprof struct {
 
 func (x *Pprof) Reset() {
 	*x = Pprof{}
-	mi := &file_conf_conf_proto_msgTypes[6]
+	mi := &file_conf_conf_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -414,7 +543,7 @@ func (x *Pprof) String() string {
 func (*Pprof) ProtoMessage() {}
 
 func (x *Pprof) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[6]
+	mi := &file_conf_conf_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -427,7 +556,7 @@ func (x *Pprof) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pprof.ProtoReflect.Descriptor instead.
 func (*Pprof) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{6}
+	return file_conf_conf_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Pprof) GetEnable() bool {
@@ -463,7 +592,7 @@ type Log struct {
 
 func (x *Log) Reset() {
 	*x = Log{}
-	mi := &file_conf_conf_proto_msgTypes[7]
+	mi := &file_conf_conf_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -475,7 +604,7 @@ func (x *Log) String() string {
 func (*Log) ProtoMessage() {}
 
 func (x *Log) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[7]
+	mi := &file_conf_conf_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -488,7 +617,7 @@ func (x *Log) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Log.ProtoReflect.Descriptor instead.
 func (*Log) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{7}
+	return file_conf_conf_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Log) GetMode() string {
@@ -523,7 +652,7 @@ type App struct {
 
 func (x *App) Reset() {
 	*x = App{}
-	mi := &file_conf_conf_proto_msgTypes[8]
+	mi := &file_conf_conf_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -535,7 +664,7 @@ func (x *App) String() string {
 func (*App) ProtoMessage() {}
 
 func (x *App) ProtoReflect() protoreflect.Message {
-	mi := &file_conf_conf_proto_msgTypes[8]
+	mi := &file_conf_conf_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -548,7 +677,7 @@ func (x *App) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use App.ProtoReflect.Descriptor instead.
 func (*App) Descriptor() ([]byte, []int) {
-	return file_conf_conf_proto_rawDescGZIP(), []int{8}
+	return file_conf_conf_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *App) GetDevMode() bool {
@@ -569,13 +698,30 @@ var File_conf_conf_proto protoreflect.FileDescriptor
 
 const file_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"\x0fconf/conf.proto\x12\x04conf\"\x8b\x01\n" +
+	"\x0fconf/conf.proto\x12\x04conf\"\xab\x01\n" +
 	"\tBootstrap\x12\x1e\n" +
 	"\x04data\x18\x01 \x01(\v2\n" +
 	".conf.DataR\x04data\x12$\n" +
 	"\x06server\x18\x02 \x01(\v2\f.conf.ServerR\x06server\x12\x1b\n" +
 	"\x03log\x18\x03 \x01(\v2\t.conf.LogR\x03log\x12\x1b\n" +
-	"\x03app\x18\x04 \x01(\v2\t.conf.AppR\x03app\"C\n" +
+	"\x03app\x18\x04 \x01(\v2\t.conf.AppR\x03app\x12\x1e\n" +
+	"\x04otel\x18\x05 \x01(\v2\n" +
+	".conf.OtelR\x04otel\"\xd1\x03\n" +
+	"\x04Otel\x12\x1a\n" +
+	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x1a\n" +
+	"\binsecure\x18\x02 \x01(\bR\binsecure\x121\n" +
+	"\aheaders\x18\x03 \x03(\v2\x17.conf.Otel.HeadersEntryR\aheaders\x12!\n" +
+	"\fservice_name\x18\x04 \x01(\tR\vserviceName\x12'\n" +
+	"\x0fservice_version\x18\x05 \x01(\tR\x0eserviceVersion\x12 \n" +
+	"\venvironment\x18\x06 \x01(\tR\venvironment\x12*\n" +
+	"\x11trace_sample_rate\x18\a \x01(\x01R\x0ftraceSampleRate\x12)\n" +
+	"\x10metrics_endpoint\x18\b \x01(\tR\x0fmetricsEndpoint\x12#\n" +
+	"\rlogs_endpoint\x18\t \x01(\tR\flogsEndpoint\x128\n" +
+	"\x18metrics_interval_seconds\x18\n" +
+	" \x01(\rR\x16metricsIntervalSeconds\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"C\n" +
 	"\x04Data\x12\x18\n" +
 	"\x02db\x18\x01 \x01(\v2\b.conf.DBR\x02db\x12!\n" +
 	"\x05redis\x18\x02 \x01(\v2\v.conf.RedisR\x05redis\"u\n" +
@@ -620,32 +766,36 @@ func file_conf_conf_proto_rawDescGZIP() []byte {
 	return file_conf_conf_proto_rawDescData
 }
 
-var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil), // 0: conf.Bootstrap
-	(*Data)(nil),      // 1: conf.Data
-	(*DB)(nil),        // 2: conf.DB
-	(*Redis)(nil),     // 3: conf.Redis
-	(*Server)(nil),    // 4: conf.Server
-	(*HTTP)(nil),      // 5: conf.HTTP
-	(*Pprof)(nil),     // 6: conf.Pprof
-	(*Log)(nil),       // 7: conf.Log
-	(*App)(nil),       // 8: conf.App
+	(*Otel)(nil),      // 1: conf.Otel
+	(*Data)(nil),      // 2: conf.Data
+	(*DB)(nil),        // 3: conf.DB
+	(*Redis)(nil),     // 4: conf.Redis
+	(*Server)(nil),    // 5: conf.Server
+	(*HTTP)(nil),      // 6: conf.HTTP
+	(*Pprof)(nil),     // 7: conf.Pprof
+	(*Log)(nil),       // 8: conf.Log
+	(*App)(nil),       // 9: conf.App
+	nil,               // 10: conf.Otel.HeadersEntry
 }
 var file_conf_conf_proto_depIdxs = []int32{
-	1, // 0: conf.Bootstrap.data:type_name -> conf.Data
-	4, // 1: conf.Bootstrap.server:type_name -> conf.Server
-	7, // 2: conf.Bootstrap.log:type_name -> conf.Log
-	8, // 3: conf.Bootstrap.app:type_name -> conf.App
-	2, // 4: conf.Data.db:type_name -> conf.DB
-	3, // 5: conf.Data.redis:type_name -> conf.Redis
-	5, // 6: conf.Server.http:type_name -> conf.HTTP
-	6, // 7: conf.HTTP.pprof:type_name -> conf.Pprof
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	2,  // 0: conf.Bootstrap.data:type_name -> conf.Data
+	5,  // 1: conf.Bootstrap.server:type_name -> conf.Server
+	8,  // 2: conf.Bootstrap.log:type_name -> conf.Log
+	9,  // 3: conf.Bootstrap.app:type_name -> conf.App
+	1,  // 4: conf.Bootstrap.otel:type_name -> conf.Otel
+	10, // 5: conf.Otel.headers:type_name -> conf.Otel.HeadersEntry
+	3,  // 6: conf.Data.db:type_name -> conf.DB
+	4,  // 7: conf.Data.redis:type_name -> conf.Redis
+	6,  // 8: conf.Server.http:type_name -> conf.HTTP
+	7,  // 9: conf.HTTP.pprof:type_name -> conf.Pprof
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_conf_conf_proto_init() }
@@ -659,7 +809,7 @@ func file_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_conf_conf_proto_rawDesc), len(file_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -13,6 +13,25 @@ message Bootstrap {
   Server server = 2;
   Log log = 3;
   App app = 4;
+  Otel otel = 5;
+}
+
+// Otel 可观测性配置：一个端点同时驱动 trace / metrics / logs 三路 OTLP/HTTP 主动推送。
+//
+// 三类信号仅是 exporter 默认路径不同（/v1/traces、/v1/metrics、/v1/logs），
+// 因此共用一个 host:port 即可；metrics_endpoint / logs_endpoint 仅作逃生口。
+// endpoint 为空表示关闭全部 OTLP 上报（默认状态，安全）。
+message Otel {
+  string endpoint = 1;                  // OTLP/HTTP 端点：host:port 或 http(s)://host:port；空值=关闭
+  bool insecure = 2;                    // 明文传输；endpoint 带 http:// 时自动为 true
+  map<string, string> headers = 3;      // 额外请求头（如 ingestion key，建议来自环境变量）
+  string service_name = 4;              // service.name，缺省为 gin-template
+  string service_version = 5;           // service.version，建议由 -ldflags 注入
+  string environment = 6;               // deployment.environment，如 production
+  double trace_sample_rate = 7;         // 采样率 0.0-1.0，0 视为 1.0
+  string metrics_endpoint = 8;          // 可选：metrics 专用端点覆盖
+  string logs_endpoint = 9;             // 可选：logs 专用端点覆盖
+  uint32 metrics_interval_seconds = 10; // 指标推送周期，0 视为 15s
 }
 
 // Data 数据层配置。
