@@ -1,10 +1,9 @@
-// Package data 是 demo 模块的数据访问层：封装对 demo 表的 GORM 操作。
+// Package data 是 demo 模块的数据访问层：模型定义（demo.go）与 GORM 操作（repo.go）。
 //
-// 只依赖 pkg/infra 与 model，不感知业务规则与 HTTP。
+// 只依赖 pkg/infra，不感知业务规则与 HTTP。
 package data
 
 import (
-	"gin-template/model"
 	"gin-template/pkg/infra"
 
 	"gorm.io/gorm"
@@ -18,20 +17,20 @@ type DemoRepo struct {
 
 func NewDemoRepo(infraData *infra.Data) *DemoRepo {
 	// AutoMigrate 自动创建/更新表结构
-	if err := infraData.DB.AutoMigrate(&model.Demo{}); err != nil {
+	if err := infraData.DB.AutoMigrate(&Demo{}); err != nil {
 		panic(err)
 	}
 	return &DemoRepo{db: infraData.DB, infraData: infraData}
 }
 
 // Create 创建记录
-func (r *DemoRepo) Create(demo *model.Demo) error {
+func (r *DemoRepo) Create(demo *Demo) error {
 	return r.db.Create(demo).Error
 }
 
 // GetByID 根据 ID 获取记录
-func (r *DemoRepo) GetByID(id uint) (*model.Demo, error) {
-	var demo model.Demo
+func (r *DemoRepo) GetByID(id uint) (*Demo, error) {
+	var demo Demo
 	err := r.db.First(&demo, id).Error
 	if err != nil {
 		return nil, err
@@ -40,11 +39,11 @@ func (r *DemoRepo) GetByID(id uint) (*model.Demo, error) {
 }
 
 // List 获取列表，支持分页
-func (r *DemoRepo) List(page, pageSize int) ([]*model.Demo, int64, error) {
-	var demos []*model.Demo
+func (r *DemoRepo) List(page, pageSize int) ([]*Demo, int64, error) {
+	var demos []*Demo
 	var total int64
 
-	db := r.db.Model(&model.Demo{})
+	db := r.db.Model(&Demo{})
 	db.Count(&total)
 
 	offset := (page - 1) * pageSize
@@ -53,11 +52,11 @@ func (r *DemoRepo) List(page, pageSize int) ([]*model.Demo, int64, error) {
 }
 
 // Update 更新记录
-func (r *DemoRepo) Update(demo *model.Demo) error {
+func (r *DemoRepo) Update(demo *Demo) error {
 	return r.db.Save(demo).Error
 }
 
 // Delete 删除记录
 func (r *DemoRepo) Delete(id uint) error {
-	return r.db.Delete(&model.Demo{}, id).Error
+	return r.db.Delete(&Demo{}, id).Error
 }

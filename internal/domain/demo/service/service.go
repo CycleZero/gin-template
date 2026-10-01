@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"gin-template/internal/domain/demo/biz"
-	"gin-template/model"
+	"gin-template/internal/domain/demo/data"
 
 	"github.com/gin-gonic/gin"
 )
@@ -158,8 +158,8 @@ func (s *DemoService) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
 }
 
-// toResponse 将 model 转换为响应 DTO
-func toResponse(demo *model.Demo) *DemoResponse {
+// toResponse 将 data 层模型转换为响应 DTO
+func toResponse(demo *data.Demo) *DemoResponse {
 	return &DemoResponse{
 		ID:          demo.ID,
 		Name:        demo.Name,

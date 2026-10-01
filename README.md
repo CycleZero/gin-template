@@ -50,9 +50,6 @@ gin-template/
 │       ├── provider.go         # Wire ProviderSet
 │       └── data.go             # MySQL + Redis 初始化
 │
-├── model/                      # 数据模型
-│   └── demo.go                 # 示例模型
-│
 ├── internal/                   # 内部模块
 │   ├── app.go                  # 应用封装（Gin Engine，package internal）
 │   ├── provider.go             # 内部 Wire 聚合
@@ -69,7 +66,7 @@ gin-template/
 │   │       ├── provider.go     # 模块 Wire Set（按层聚合）
 │   │       ├── service/        # HTTP 层：service.go + dto.go + provider.go
 │   │       ├── biz/            # 业务层：biz.go + provider.go
-│   │       └── data/           # 数据层：repo.go + provider.go
+│   │       └── data/           # 数据层：模型 demo.go + repo.go + provider.go
 │   └── router/                 # 路由层
 │       ├── provider.go         # 中间件注册
 │       ├── root.go             # 路由注册
@@ -98,15 +95,16 @@ internal/domain/<svc>/
 │   ├── biz.go      # 业务规则、数据校验、流程编排
 │   └── provider.go # biz.ProviderSet
 └── data/           # 数据层
+    ├── demo.go     # 数据模型（GORM PO，随所属 svc 归档）
     ├── repo.go     # 数据库操作封装（GORM）
     └── provider.go # data.ProviderSet
 ```
 
 各层约束：
 
-- **service/** 只依赖 `biz/`，不直接访问数据库；DTO 与 HTTP 语义都收敛在这一层
-- **biz/** 只依赖 `data/` 与 `model/`，不感知 HTTP（同一份业务可复用于 gRPC、定时任务等）
-- **data/** 只依赖 `pkg/infra` 与 `model/`，不感知业务规则
+- **service/** 只依赖 `biz/`（响应转换时会引用 `data/` 的模型类型），不直接访问数据库；DTO 与 HTTP 语义收敛在这一层
+- **biz/** 只依赖 `data/`，不感知 HTTP（同一份业务可复用于 gRPC、定时任务等）
+- **data/** 只依赖 `pkg/infra`，持有本模块的数据模型（GORM PO）与仓储实现，不感知业务规则
 
 ## 日志
 
@@ -343,9 +341,9 @@ make build-linux # 交叉编译 Linux
 1. 创建目录与文件：
    - `internal/domain/user/service/{service.go,dto.go,provider.go}`：HTTP 层
    - `internal/domain/user/biz/{biz.go,provider.go}`：业务层
-   - `internal/domain/user/data/{repo.go,provider.go}`：数据层
+   - `internal/domain/user/data/{user.go,repo.go,provider.go}`：数据层（含该模块的 GORM 模型）
    - `internal/domain/user/provider.go`：聚合三层 ProviderSet
-2. 各层只依赖下一层：`service → biz → data`（`data` 依赖 `pkg/infra` 与 `model`）
+2. 各层只依赖下一层：`service → biz → data`；数据模型放在自己的 `data` 包里（不再有全局 `model` 包）
 3. 在 `internal/domain/hub.go` 的 `ServiceHub` 中添加新的 Service 字段
 4. 在 `internal/domain/provider.go` 中引入 `user.ProviderSet`
 5. 在 `internal/router/root.go` 中注册新路由

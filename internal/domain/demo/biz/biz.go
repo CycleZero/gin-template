@@ -1,13 +1,12 @@
 // Package biz 是 demo 模块的业务逻辑层：业务规则、流程编排与数据转换。
 //
-// 只依赖 data 层与 model，不感知 HTTP（因此可被 HTTP / gRPC / 定时任务等复用）。
+// 只依赖 data 层，不感知 HTTP（因此可被 HTTP / gRPC / 定时任务等复用）。
 package biz
 
 import (
 	"log/slog"
 
 	"gin-template/internal/domain/demo/data"
-	"gin-template/model"
 )
 
 // DemoBiz 业务逻辑层 - 处理业务规则和数据转换
@@ -24,8 +23,8 @@ func NewDemoBiz(logger *slog.Logger, demoRepo *data.DemoRepo) *DemoBiz {
 }
 
 // Create 创建新记录
-func (b *DemoBiz) Create(name, description string, createdBy uint) (*model.Demo, error) {
-	demo := &model.Demo{
+func (b *DemoBiz) Create(name, description string, createdBy uint) (*data.Demo, error) {
+	demo := &data.Demo{
 		Name:        name,
 		Description: description,
 		Status:      1,
@@ -40,7 +39,7 @@ func (b *DemoBiz) Create(name, description string, createdBy uint) (*model.Demo,
 }
 
 // GetByID 获取记录
-func (b *DemoBiz) GetByID(id uint) (*model.Demo, error) {
+func (b *DemoBiz) GetByID(id uint) (*data.Demo, error) {
 	demo, err := b.demoRepo.GetByID(id)
 	if err != nil {
 		b.logger.Error("获取 Demo 失败", "error", err, "id", id)
@@ -50,12 +49,12 @@ func (b *DemoBiz) GetByID(id uint) (*model.Demo, error) {
 }
 
 // List 获取列表
-func (b *DemoBiz) List(page, pageSize int) ([]*model.Demo, int64, error) {
+func (b *DemoBiz) List(page, pageSize int) ([]*data.Demo, int64, error) {
 	return b.demoRepo.List(page, pageSize)
 }
 
 // Update 更新记录
-func (b *DemoBiz) Update(id uint, name, description string) (*model.Demo, error) {
+func (b *DemoBiz) Update(id uint, name, description string) (*data.Demo, error) {
 	demo, err := b.demoRepo.GetByID(id)
 	if err != nil {
 		b.logger.Error("获取 Demo 失败", "error", err, "id", id)
