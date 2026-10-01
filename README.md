@@ -15,7 +15,51 @@
 | [Zap](https://github.com/uber-go/zap) | 日志后端，经 zapslog 桥接到 slog |
 | [GORM](https://gorm.io) | ORM 框架 (MySQL) |
 | [Redis](https://github.com/redis/go-redis) | 缓存/会话 |
-| [JWT](https://github.com/golang-jwt/jwt) | 认证授权 |
+| [JWT](https://github.com/golang-jwt/jwt) | 认证授权（中间件工厂已就绪，默认未挂载到路由） |
+
+## 快速开始
+
+### 环境要求
+
+- Go 1.27.1+
+- MySQL 8.0+
+- Redis 6.0+（可选）
+- buf + protoc-gen-go（仅在修改 `conf.proto` 时需要；`conf.pb.go` 已入库）
+
+### 安装步骤
+
+```bash
+# 1. 克隆模板
+git clone <your-repo-url> myproject
+cd myproject
+
+# 2. 修改模块名：go.mod 第一行 + 全局替换 import 路径 gin-template → your-module-name
+
+# 3. 复制配置文件（生成的 conf.pb.go 已入库，不改 proto 则无需生成代码）
+cp config.yaml.example config.yaml
+# 编辑 config.yaml，填写数据库连接信息
+
+# 4. 安装依赖
+go mod tidy
+
+# 5. 生成依赖注入代码（go run 使用 go.mod 锁定的 wire 版本，无需预装 wire 二进制）
+make wire
+
+# 6. 启动服务
+make run
+```
+
+服务启动后：
+
+| 地址 | 说明 |
+|---|---|
+| `http://localhost:8000/api/demo` | Demo CRUD 示例接口 |
+| `http://localhost:8000/healthz` | 存活探针（不查依赖） |
+| `http://localhost:8000/readyz` | 就绪探针（探测 MySQL / Redis） |
+| `http://localhost:6060/debug/pprof/` | 性能分析（需开启 `server.http.pprof.enable`） |
+
+> 连不上数据库时进程会直接退出（`log.Fatal`），所以第 3 步的数据库配置必须先填对；
+> 见[已知限制](#已知限制与后续可扩展)。
 
 ## 项目结构
 
@@ -49,8 +93,11 @@ gin-template/
 │   │   └── redis.go            # go-redis Hook（命令级 span + 耗时指标）
 │   ├── metrics/                # metrics 接入
 │   │   └── metrics.go          # OTLP 周期推送 + Go runtime 指标
+│   ├── cache/                  # 缓存抽象（Redis / 内存实现，可选能力库）
+│   ├── oss/                    # 对象存储抽象（MinIO / COS + trace 装饰器，可选）
+│   ├── tx/                     # 事务管理（ctx 传递 *sql.Tx，biz 控制边界，可选）
 │   ├── errs/                   # 统一错误体系（业务码 + HTTP 状态码 + 对外消息）
-│   ├── response/               # 统一响应封装（响应信封 + 分页 + trace_id）
+│   ├── response/               # 统一响应封装（OK / Fail(4xx) / Error(5xx) + trace_id）
 │   └── infra/                  # 基础设施层
 │       ├── provider.go         # Wire ProviderSet
 │       └── data.go             # MySQL + Redis 初始化 + 连接池 + Health/Close
@@ -120,8 +167,9 @@ internal/domain/<svc>/
 
 - 依赖方向是 `service → biz ← data`：**biz 不 import data**（仓储接口定义在 biz，由 data 实现），
   所以没有循环依赖，且 biz 可注入假仓储做单元测试。
-- 领域错误（如 `biz.ErrDemoNotFound`）由 data 层在未命中时返回，service 层用 `errors.Is`
-  映射为 404 —— 上层不依赖 `gorm.ErrRecordNotFound` 这类存储细节。
+- 领域错误（如 `biz.ErrDemoNotFound`）由 data 层在未命中时返回，service 层交给
+  `respondBizError` 按 4xx/5xx 分流到 `response.Fail` / `response.Error`
+  —— 上层既不认识 `gorm.ErrRecordNotFound`，也不逐个判断错误类型。
 - `context.Context` 从 `c.Request.Context()` 一路向下传递，链路追踪（OTel）与事务
   （[pkg/tx](pkg/tx/tx.go)）都能沿 ctx 传播。
 
@@ -256,7 +304,13 @@ log:
 ## 可观测性（OpenTelemetry）
 
 trace / metrics / logs 三路**共用一个 OTLP/HTTP 端点**主动推送，仅 exporter 默认路径不同
-（`/v1/traces`、`/v1/metrics`、`/v1/logs`）；`otel.endpoint` 留空表示全部关闭（默认，零开销）。
+（`/v1/traces`、`/v1/metrics`、`/v1/logs`）。
+
+`otel.endpoint` 留空（默认）时的行为需要区分清楚：
+
+- **traces**：仍安装 Provider 并生成/传播 TraceID（`NeverSample` + 无导出器）——
+  因为「请求 ID = TraceID」依赖它；不记录、不导出 span，开销可忽略
+- **metrics / logs**：不启用（`metrics.Init` 返回 `nil` 表示未启用）
 
 ```yaml
 otel:
@@ -284,15 +338,18 @@ otel:
 **埋点覆盖**（本模板自带技术栈）：
 
 - **HTTP**：[pkg/trace/gin.go](pkg/trace/gin.go) 的 `trace.Middleware(serviceName)` 挂在 Gin 上，
-  产生 server span 并记录 `http.server.*` 指标（仅在配置了 OTLP 端点时挂载）。
+  产生 server span 并记录 `http.server.*` 指标。**始终挂载**——即使未配置端点也挂，
+  因为请求 ID 取自 span 的 TraceID（此时 span 不记录、不导出）。
 - **Redis**：[pkg/infra/data.go](pkg/infra/data.go) 构造客户端时挂 `trace.HookRedis`，
   产生命令级 span 与 `redis_client_operation_duration_ms` 指标；只记录命令名与结果，
   不记录 key / 参数（既避免 PII 泄漏，也避免指标标签基数爆炸）。
 - **Go runtime**：`metrics.Init` 内启动，goroutine / 内存 / GC 随周期上报。
 
 **生命周期**：[cmd/main/main.go](cmd/main/main.go) 按 `logger → trace → metrics → Wire` 顺序
-初始化，退出时**逆序** flush（trace → metrics → 日志 → 配置），每步 5s 超时预算。
-`Init` 在端点为空时返回 `nil` 表示未启用，`Shutdown(nil)` 为空操作，可安全重复调用。
+初始化；退出（SIGINT/SIGTERM）时按 `HTTP 排空 → 释放 DB/Redis → trace → metrics → 日志 → 配置`
+收尾，各步共用 5s 超时预算（详见[优雅停机](#优雅停机)）。
+`trace.Init` 始终返回可用 Provider；`metrics.Init` 在端点为空的返回 `nil` 表示未启用，
+`Shutdown(nil)` 为空操作，可安全重复调用。
 
 > 注意：`log.Fatal` 路径（例如启动时连不上数据库）会 flush 日志后立即 `os.Exit(1)`，
 > 不会 flush trace/metrics——此时通常还没有值得上报的 span/指标。运行期需要保证上报的
@@ -304,43 +361,6 @@ otel:
 go test ./pkg/log/ ./pkg/trace/ ./pkg/metrics/ ./pkg/otelx/
 ```
 
-## 快速开始
-
-### 环境要求
-
-- Go 1.27.1+
-- MySQL 8.0+
-- Redis 6.0+（可选）
-
-### 安装步骤
-
-```bash
-# 1. 克隆模板
-git clone <your-repo-url> myproject
-cd myproject
-
-# 2. 修改模块名（全局替换 gin-template → your-module-name）
-# 修改 go.mod 第一行
-
-# 3. 复制配置文件
-cp config.yaml.example config.yaml
-# 编辑 config.yaml，修改数据库连接信息
-
-# 4. 安装依赖
-go mod tidy
-
-# 5. 生成依赖注入代码（通过 go run 使用 go.mod 锁定的 wire 版本，无需预装 wire 二进制）
-make wire
-
-# 6. 启动服务
-make run
-```
-
-服务启动后访问：
-- API: `http://localhost:8000/api/demo`
-- 健康检查: `http://localhost:8000/healthz`、`http://localhost:8000/readyz`
-- pprof: `http://localhost:6060/debug/pprof/`（需开启 `server.http.pprof.enable`）
-
 ## 配置说明
 
 配置由 [Kratos v3 的 config 组件](https://go-kratos.dev/docs/component/config/) 加载，
@@ -350,19 +370,26 @@ make run
 2. **env source**：`APP_` 前缀环境变量（部署覆盖）
 
 本包**不保存全局配置**：`conf.Load` 读取并校验后返回 `*conf.Bootstrap` 与来源句柄，
-由入口显式注入到各构造函数（项目内通过 Wire 完成），测试时可直接构造替换：
+由入口显式注入到各构造函数（项目内通过 Wire 完成），测试时可直接构造替换。
+[cmd/main/main.go](cmd/main/main.go) 的实际装配（日志 → trace → metrics → Wire）：
 
 ```go
-cfg, src, err := conf.Load(*confPath) // src 用于 Close / Watch
+cfg, cfgSource, err := conf.Load(*confPath) // cfgSource 用于 Close / Watch
 if err != nil {
     fmt.Fprintln(os.Stderr, "启动失败:", err)
     os.Exit(1)
 }
-defer src.Close()
 
-logger, err := log.NewLogger(cfg)
-slog.SetDefault(logger)
-app := initApp(cfg, logger) // cfg 一路随构造函数显式传递
+service := cfg.OtelServiceInfo(hostname())                  // 三信号共用的服务身份
+tracesEP, metricsEP, logsEP := otelEndpoints(cfg.GetOtel()) // 一个端点派生三路
+
+logger, err := log.New(logConfig(cfg, service, logsEP))     // 控制台 + 文件 + OTLP
+slog.SetDefault(logger.Logger)                              // 包级 slog 共用同一后端
+
+tracerProvider, _ := trace.Init(traceConfig(cfg, service, tracesEP))
+meterProvider, _ := metrics.Init(metricsConfig(cfg, service, metricsEP))
+
+app := initApp(cfg, logger.Logger) // cfg 与 logger 一路随构造函数显式传递
 ```
 
 配置文件里的 `${KEY:default}` 占位符会从「合并后的配置」解析，因此嵌套项也能被
@@ -419,7 +446,7 @@ go run ./cmd/main -conf /etc/myapp/config.yaml
 的 `config.WithSource(...)` 中追加对应 source（如 `contrib/config/etcd/v3`），
 再用 `Load` 返回的 `*conf.Source` 注册热更新回调（`src.Watch(key, observer)`），
 业务代码无需改动。`src.Close()` 必须在进程退出前调用以释放 watcher
-（[cmd/main/main.go](cmd/main/main.go) 已通过 defer 处理）。
+（[cmd/main/main.go](cmd/main/main.go) 在优雅停机的最后一步调用）。
 
 ## API 文档
 
@@ -445,6 +472,41 @@ make tidy        # 整理依赖
 make build-linux # 交叉编译 Linux
 ```
 
+> `conf.pb.go` 与 `wire_gen.go` 都入库：克隆后无需任何代码生成工具即可构建。
+
+## 测试
+
+模板的测试**不依赖任何外部服务**（无需 MySQL / Redis / OTLP collector），直接跑：
+
+```bash
+go test ./...              # 全部测试
+go test ./... -race        # 竞态检测
+go vet ./...               # 静态检查
+gofmt -l .                 # 格式检查（无输出即通过）
+go test ./pkg/response/ -v # 单包详情
+```
+
+| 包 | 覆盖内容 |
+|---|---|
+| `internal/conf` | 配置加载与覆盖、DSN/Addr、校验 |
+| `internal/domain/demo/data` | 领域模型 ↔ PO 映射完整性（往返结构体比较，漏映射即失败） |
+| `internal` | 优雅停机排空在途请求、pprof 配置门控与真实可访问、`/healthz` 与 `/readyz` 契约、请求 ID 闭环、`traceparent` 续接 |
+| `pkg/errs` | 错误归一化、cause 不外泄、哨兵错误不被污染、按业务码 `Is` 匹配 |
+| `pkg/response` | 响应信封、4xx/5xx 出口语义与日志行为、`trace_id` 同源 |
+| `pkg/otelx` | OTLP 端点解析（含非法输入不 panic）、Resource 属性 |
+| `pkg/trace` | 无端点也必须有 TraceID、采样兜底、Shutdown 语义 |
+| `pkg/log` | OTLP 日志端到端（假接收端）+ `trace.id` 关联字段 |
+| `pkg/metrics` | OTLP 指标端到端（假接收端） |
+| `pkg/cache`、`pkg/oss`、`pkg/tx` | 可选能力库自带用例 |
+
+几点说明：
+
+- **三路信号的端到端测试**用进程内 `httptest` 充当 OTLP 接收端，解开 protobuf 后断言
+  `trace_id` / `span_id` / body / Resource 属性，因此不部署 collector 也能验证"真的推出了"。
+- **数据层映射用结构体整体比较**断言：给领域模型加字段却忘记改映射时直接失败，不会静默丢字段。
+- 需要真实数据库的集成测试**未包含**（模板刻意不引入外部依赖）；要补的话可用 testcontainers
+  或纯 Go 的 sqlite 驱动跑仓储层。
+
 ## 添加新业务模块
 
 以新增 `user` 模块为例（按层分目录，可直接复制 `demo/` 的骨架）：
@@ -461,6 +523,22 @@ make build-linux # 交叉编译 Linux
 5. 在 `internal/router/root.go` 中注册新路由
 6. 运行 `make wire` 重新生成依赖注入代码
 
+## 已知限制与后续可扩展
+
+当前实现刻意保持精简。以下按优先级列出已知缺口，投入生产前建议逐项确认：
+
+| 项 | 现状 | 建议 |
+|---|---|---|
+| 启动依赖 | 连不上 MySQL 直接 `log.Fatal` 退出（只 flush 日志，不 flush trace/metrics） | 若要"依赖不可用也先起服务、由 `/readyz` 报告"，让 `infra.NewData` 返回 error（Wire 支持 error provider），由 `main` 走正常退出路径 |
+| 认证 | JWT 中间件工厂已注册，但**未挂载到任何路由**，密钥仍是示例常量 | 密钥接入配置/密钥管理，按路由分组挂载，并把鉴权结果写入 `common.RequestMetadata.UserID` |
+| 请求体与代理 | 未限制请求体大小，未设置 `SetTrustedProxies` | `c.ClientIP()` 目前会信任任意 `X-Forwarded-For`，生产必须显式配置可信代理 |
+| HTTP 超时 | 编译期常量（见 [internal/server.go](internal/server.go)） | 需要按环境调参时加进 `conf.proto` 并重跑 `make config` |
+| 数据库迁移 | 仅 `AutoMigrate`（开发够用） | 生产建议引入版本化迁移（goose / atlas / golang-migrate） |
+| 可选能力库 | `pkg/cache`、`pkg/oss`、`pkg/tx` 尚未被业务引用 | 接入方式：`pkg/tx` 在 data 层用 `tx.WithContext(ctx, r.db)` 即可复用 biz 开启的事务；`pkg/cache` 可做 cache-aside 装饰器 |
+| 数据库埋点 | HTTP / Redis 有 span 与指标，GORM 没有 | SQL 通常是延迟大头，可接 `gorm.io/plugin/opentelemetry` |
+| 工程化 | 无 CI、无 Dockerfile、无 lint 配置 | 建议 `make verify`（fmt + vet + test + 生成物漂移检查）+ GitHub Actions |
+| 配置热更新 | `conf.Source.Watch` 能力已就绪但未使用 | 需要动态开关/灰度时可基于它实现 |
+
 ## 许可证
 
-MIT
+[MIT](LICENSE) © 2026 CycleZero
