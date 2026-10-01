@@ -127,7 +127,7 @@ internal/domain/<svc>/
 
 ## HTTP 契约与错误码
 
-所有接口（成功与失败）返回同一信封，前端只需一套解析逻辑：
+所有接口返回同一信封；**业务数据统一放在 `data` 字段下**，前端只需一套解析逻辑：
 
 ```json
 {
@@ -138,8 +138,17 @@ internal/domain/<svc>/
 }
 ```
 
-- **成功**：`response.OK(c, data)`；分页用 `response.OKPage(c, list, total, page, pageSize)`（空列表序列化为 `[]`）
-- **失败**：`response.Fail(c, err)` —— 状态码、业务码与对外消息都由 [pkg/errs](pkg/errs/errs.go) 统一映射，handler 里不再写分支
+三个出口，语义严格区分（状态码与业务码由 [pkg/errs](pkg/errs/errs.go) 统一映射，handler 不写分支）：
+
+| 出口 | 语义 | 典型错误 | 日志 |
+|---|---|---|---|
+| `response.OK(c, data)` | 成功（200） | — | — |
+| `response.Fail(c, err)` | **请求方错误（4xx）** | `InvalidArgument` / `Unauthorized` / `Forbidden` / `NotFound` / `Conflict` / `TooManyRequests` | 不写日志（避免告警噪声） |
+| `response.Error(c, err)` | **服务端错误（5xx）** | `Internal` / `Unavailable` / `Timeout`，或任何未归一化的 error | 记 error 级别（含 cause、method/path 与 trace_id） |
+
+- 分页、列表等业务结构由各 service 的 DTO 定义，整体作为 `data` 返回（如 demo 的 `ListDemoResponse`），`pkg/response` 不规定业务结构。
+- 选错出口不会改变对外语义：`Fail` 收到 5xx、`Error` 收到 4xx 时仍按错误自身状态码返回，但各记一条告警提示修正调用点（有测试覆盖）。
+- 对 biz 返回的错误，service 用一个分流函数决定走哪个出口（见 [respondBizError](internal/domain/demo/service/service.go)），保证监控面板里 4xx/5xx 归类正确。
 
 业务码沿用 `HTTP 状态码 × 100`：`40000` 参数错误、`40100` 未认证、`40300` 无权限、`40400` 不存在、`40900` 冲突、`42900` 限流、`50000` 内部错误、`50300` 依赖不可用、`50400` 超时。
 
@@ -149,7 +158,7 @@ internal/domain/<svc>/
 |---|---|
 | `data/` | 把存储错误翻译成**领域错误**（如 `biz.ErrDemoNotFound = errs.NotFound("记录不存在")`），上层不认识 `gorm.ErrRecordNotFound` |
 | `biz/` | 定义领域错误；基础设施错误用 `errs.Internal(...).WithCause(err)` 归一化（cause 只进日志） |
-| `service/` | 只调用 `response.Fail(c, err)`，不判断错误类型 |
+| `service/` | 只调 `respondBizError`（按 4xx/5xx 分流到 `Fail`/`Error`），不判断具体错误类型 |
 
 未归一化的 error 一律按 `500` + 固定文案返回，**绝不透出 SQL/DSN 等内部细节**（`pkg/errs`、`pkg/response` 有测试锁死这条）。
 

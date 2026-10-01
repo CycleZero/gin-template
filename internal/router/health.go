@@ -2,7 +2,6 @@ package router
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,9 +40,9 @@ func RegisterHealth(root gin.IRouter, readiness ReadinessChecker) {
 		defer cancel()
 
 		if err := readiness(ctx); err != nil {
-			// 详情只进日志（含具体依赖名），响应只给 503 + 稳定业务码
-			slog.ErrorContext(ctx, "就绪检查失败", "error", err)
-			response.Fail(c, errs.Unavailable("依赖未就绪").WithCause(err))
+			// 详情只进日志（含具体依赖名）；响应给 503 + 稳定业务码。
+			// 依赖不可用属服务端问题，因此走 response.Error（5xx 语义）。
+			response.Error(c, errs.Unavailable("依赖未就绪").WithCause(err))
 			return
 		}
 

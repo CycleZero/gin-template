@@ -2,14 +2,16 @@
 //
 // 职责：
 //   - 解析请求、校验参数（DTO 定义见 dto.go）
-//   - 调用 biz 用例，并把 biz 领域模型转换为响应 DTO（转换函数也在 dto.go）
-//   - 用 pkg/response 渲染响应：成功 OK/OKPage，失败 Fail（状态码与业务码由 pkg/errs 统一映射）
+//   - 调用 biz 用例，并把 biz 领域模型转换为响应 DTO（转换函数在 dto.go）
+//   - 用 pkg/response 渲染：成功走 OK（业务数据统一放在 data 字段下），
+//     失败时 4xx 走 Fail、5xx 走 Error（见 respondBizError）
 //
 // 约束：只依赖 biz，**不 import data**——HTTP 层不会泄漏数据库模型。
 package service
 
 import (
 	"log/slog"
+	"net/http"
 	"strconv"
 
 	"gin-template/internal/domain/demo/biz"
@@ -32,6 +34,19 @@ func NewDemoService(demoBiz *biz.DemoBiz, logger *slog.Logger) *DemoService {
 	}
 }
 
+// respondBizError 按错误性质选择响应通道：
+//   - 4xx（如领域错误 ErrDemoNotFound）→ response.Fail，不产生错误日志
+//   - 5xx（依赖故障、超时、未归一化错误）→ response.Error，记录错误日志
+//
+// 这样 handler 不必逐个判断错误类型，同时保证监控面板里的 4xx/5xx 归类正确。
+func respondBizError(c *gin.Context, err error) {
+	if status, _, _ := errs.Resolve(err); status >= http.StatusInternalServerError {
+		response.Error(c, err)
+		return
+	}
+	response.Fail(c, err)
+}
+
 // Create 创建 Demo
 // @Summary 创建 Demo
 // @Tags demo
@@ -52,7 +67,7 @@ func (s *DemoService) Create(c *gin.Context) {
 
 	demo, err := s.demoBiz.Create(ctx, req.Name, req.Description, 0)
 	if err != nil {
-		response.Fail(c, err)
+		respondBizError(c, err)
 		return
 	}
 
@@ -73,11 +88,11 @@ func (s *DemoService) GetByID(c *gin.Context) {
 		return
 	}
 
-	// 领域错误（如 ErrDemoNotFound → 404）由 response.Fail 统一映射，
+	// 领域错误（ErrDemoNotFound → 404）与服务端错误在此分流，
 	// handler 里不再出现 if errors.Is(...) 分支。
 	demo, err := s.demoBiz.GetByID(c.Request.Context(), uint(id))
 	if err != nil {
-		response.Fail(c, err)
+		respondBizError(c, err)
 		return
 	}
 
@@ -110,7 +125,7 @@ func (s *DemoService) List(c *gin.Context) {
 
 	demos, total, err := s.demoBiz.List(c.Request.Context(), page, pageSize)
 	if err != nil {
-		response.Fail(c, err)
+		respondBizError(c, err)
 		return
 	}
 
@@ -118,7 +133,13 @@ func (s *DemoService) List(c *gin.Context) {
 	for _, d := range demos {
 		responses = append(responses, newDemoResponse(d))
 	}
-	response.OKPage(c, responses, total, page, pageSize)
+
+	// 分页结构由本模块的 DTO 定义，整体作为 data 返回（pkg/response 不规定业务结构）
+	response.OK(c, ListDemoResponse{
+		List:  responses,
+		Total: total,
+		Page:  page,
+	})
 }
 
 // Update 更新 Demo
@@ -145,7 +166,7 @@ func (s *DemoService) Update(c *gin.Context) {
 
 	demo, err := s.demoBiz.Update(c.Request.Context(), uint(id), req.Name, req.Description)
 	if err != nil {
-		response.Fail(c, err)
+		respondBizError(c, err)
 		return
 	}
 
@@ -167,7 +188,7 @@ func (s *DemoService) Delete(c *gin.Context) {
 	}
 
 	if err := s.demoBiz.Delete(c.Request.Context(), uint(id)); err != nil {
-		response.Fail(c, err)
+		respondBizError(c, err)
 		return
 	}
 

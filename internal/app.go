@@ -56,7 +56,8 @@ func NewMainApp(
 	e.Use(accessLogger())
 	e.Use(gin.CustomRecovery(func(c *gin.Context, err any) {
 		slog.ErrorContext(c.Request.Context(), "发生 Panic", "error", err)
-		response.Fail(c, errs.Internal("服务器内部错误"))
+		// panic 属服务端错误：走 response.Error（5xx 语义，并记录日志）
+		response.Error(c, errs.Internal("服务器内部错误"))
 	}))
 
 	// OTel HTTP 埋点：**始终启用**。它负责为每个请求产生 span 并写入 TraceID，
