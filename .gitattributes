@@ -1,0 +1,10 @@
+# 统一按 LF 检出与存储，避免 Windows 上 core.autocrlf=true 把工作区变成 CRLF
+# （.gitattributes 的 eol 设置优先于 core.autocrlf，无需每个克隆单独配置）
+#
+# 不这样做的后果：gofmt -l 会把每个 .go 文件都标记为“未格式化”，
+# 因为 gofmt 认为 CRLF 不是规范格式。
+* text=auto eol=lf
+
+# 生成物在 GitHub 上折叠展示
+internal/conf/conf.pb.go linguist-generated=true
+cmd/main/wire_gen.go linguist-generated=true
