@@ -65,7 +65,7 @@ gin-template/
 │   │   └── demo/               # 示例业务模块（按层分目录）
 │   │       ├── provider.go     # 模块 Wire Set（按层聚合）
 │   │       ├── service/        # HTTP 层：service.go + dto.go + provider.go
-│   │       ├── biz/            # 业务层：biz.go + provider.go
+│   │       ├── biz/            # 业务层：领域模型 demo.go + biz.go + provider.go
 │   │       └── data/           # 数据层：模型 demo.go + repo.go + provider.go
 │   └── router/                 # 路由层
 │       ├── provider.go         # 中间件注册
@@ -87,24 +87,34 @@ HTTP 请求 → <svc>/service/ (HTTP 层) → <svc>/biz/ (业务层) → <svc>/d
 ```
 internal/domain/<svc>/
 ├── provider.go     # 模块 Wire Set：聚合下面三层的 ProviderSet
-├── service/        # HTTP 层
-│   ├── service.go  # 请求解析、参数校验、响应格式化
-│   ├── dto.go      # 请求/响应数据结构
+├── service/        # HTTP 层（DDD interface 层）
+│   ├── service.go  # 请求解析、参数校验、领域错误 → HTTP 状态码
+│   ├── dto.go      # DTO 定义 + biz 领域模型 ↔ DTO 转换
 │   └── provider.go # service.ProviderSet
-├── biz/            # 业务层
-│   ├── biz.go      # 业务规则、数据校验、流程编排
+├── biz/            # 业务层（DDD domain 层）
+│   ├── demo.go     # 领域模型 + 仓储接口（依赖倒置）+ 领域错误
+│   ├── biz.go      # 业务规则与流程编排（依赖仓储接口，不依赖 data）
 │   └── provider.go # biz.ProviderSet
-└── data/           # 数据层
-    ├── demo.go     # 数据模型（GORM PO，随所属 svc 归档）
-    ├── repo.go     # 数据库操作封装（GORM）
+└── data/           # 数据层（DDD infrastructure 层）
+    ├── demo.go     # 数据库模型（GORM PO）
+    ├── repo.go     # 实现 biz 的仓储接口 + PO ↔ 领域模型转换
     └── provider.go # data.ProviderSet
 ```
 
-各层约束：
+各层职责与依赖（严格 DDD + 依赖倒置）：
 
-- **service/** 只依赖 `biz/`（响应转换时会引用 `data/` 的模型类型），不直接访问数据库；DTO 与 HTTP 语义收敛在这一层
-- **biz/** 只依赖 `data/`，不感知 HTTP（同一份业务可复用于 gRPC、定时任务等）
-- **data/** 只依赖 `pkg/infra`，持有本模块的数据模型（GORM PO）与仓储实现，不感知业务规则
+| 层 | 定义什么 | 负责的转换 | 允许依赖 |
+|---|---|---|---|
+| `service/` | DTO | biz 领域模型 ↔ DTO | `biz` |
+| `biz/` | **领域模型** + **仓储接口** + 领域错误 | — | 标准库（仅依赖仓储接口） |
+| `data/` | 数据库模型（PO） | PO ↔ biz 领域模型 | `biz`、`pkg/infra` |
+
+- 依赖方向是 `service → biz ← data`：**biz 不 import data**（仓储接口定义在 biz，由 data 实现），
+  所以没有循环依赖，且 biz 可注入假仓储做单元测试。
+- 领域错误（如 `biz.ErrDemoNotFound`）由 data 层在未命中时返回，service 层用 `errors.Is`
+  映射为 404 —— 上层不依赖 `gorm.ErrRecordNotFound` 这类存储细节。
+- `context.Context` 从 `c.Request.Context()` 一路向下传递，链路追踪（OTel）与事务
+  （[pkg/tx](pkg/tx/tx.go)）都能沿 ctx 传播。
 
 ## 日志
 
@@ -339,11 +349,12 @@ make build-linux # 交叉编译 Linux
 以新增 `user` 模块为例（按层分目录，可直接复制 `demo/` 的骨架）：
 
 1. 创建目录与文件：
-   - `internal/domain/user/service/{service.go,dto.go,provider.go}`：HTTP 层
-   - `internal/domain/user/biz/{biz.go,provider.go}`：业务层
-   - `internal/domain/user/data/{user.go,repo.go,provider.go}`：数据层（含该模块的 GORM 模型）
+   - `internal/domain/user/service/{service.go,dto.go,provider.go}`：DTO + biz 模型 ↔ DTO 转换
+   - `internal/domain/user/biz/{user.go,biz.go,provider.go}`：**领域模型** `User` + **仓储接口** `UserRepo` + 业务逻辑
+   - `internal/domain/user/data/{user.go,repo.go,provider.go}`：**PO**（GORM 模型）+ 仓储实现 + PO ↔ 领域模型转换
    - `internal/domain/user/provider.go`：聚合三层 ProviderSet
-2. 各层只依赖下一层：`service → biz → data`；数据模型放在自己的 `data` 包里（不再有全局 `model` 包）
+2. 依赖方向 `service → biz ← data`：**biz 不 import data**（仓储接口定义在 biz），
+   `data.NewUserRepo` 直接返回 `biz.UserRepo`，Wire 无需 `wire.Bind`
 3. 在 `internal/domain/hub.go` 的 `ServiceHub` 中添加新的 Service 字段
 4. 在 `internal/domain/provider.go` 中引入 `user.ProviderSet`
 5. 在 `internal/router/root.go` 中注册新路由

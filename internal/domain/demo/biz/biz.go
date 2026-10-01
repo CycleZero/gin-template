@@ -1,76 +1,80 @@
-// Package biz 是 demo 模块的业务逻辑层：业务规则、流程编排与数据转换。
+// Package biz 是 demo 模块的业务逻辑层（DDD 的 domain/service 层）。
 //
-// 只依赖 data 层，不感知 HTTP（因此可被 HTTP / gRPC / 定时任务等复用）。
+// 职责：
+//   - 定义领域模型（demo.go 的 Demo）与仓储接口（DemoRepo）——依赖倒置
+//   - 编排业务流程、执行业务规则，返回领域模型或领域错误
+//
+// 约束：只依赖标准库与仓储**接口**，不 import data，也不感知 HTTP，
+// 因此同一份业务可被 HTTP / gRPC / 定时任务等复用，并可注入假仓储做单元测试。
 package biz
 
 import (
+	"context"
 	"log/slog"
-
-	"gin-template/internal/domain/demo/data"
 )
 
-// DemoBiz 业务逻辑层 - 处理业务规则和数据转换
+// DemoBiz demo 模块的业务逻辑实现。
 type DemoBiz struct {
-	logger   *slog.Logger
-	demoRepo *data.DemoRepo
+	logger *slog.Logger
+	repo   DemoRepo
 }
 
-func NewDemoBiz(logger *slog.Logger, demoRepo *data.DemoRepo) *DemoBiz {
+// NewDemoBiz 由 Wire 注入仓储接口实现（实际是 data 层的 demoRepo）。
+func NewDemoBiz(logger *slog.Logger, repo DemoRepo) *DemoBiz {
 	return &DemoBiz{
-		logger:   logger,
-		demoRepo: demoRepo,
+		logger: logger,
+		repo:   repo,
 	}
 }
 
-// Create 创建新记录
-func (b *DemoBiz) Create(name, description string, createdBy uint) (*data.Demo, error) {
-	demo := &data.Demo{
+// Create 创建记录，返回新建的领域模型。
+func (b *DemoBiz) Create(ctx context.Context, name, description string, createdBy uint) (*Demo, error) {
+	demo := &Demo{
 		Name:        name,
 		Description: description,
-		Status:      1,
+		Status:      1, // 新建默认启用
 		CreatedBy:   createdBy,
 	}
-	err := b.demoRepo.Create(demo)
-	if err != nil {
-		b.logger.Error("创建 Demo 失败", "error", err)
+	if err := b.repo.Create(ctx, demo); err != nil {
+		b.logger.ErrorContext(ctx, "创建 Demo 失败", "error", err)
 		return nil, err
 	}
 	return demo, nil
 }
 
-// GetByID 获取记录
-func (b *DemoBiz) GetByID(id uint) (*data.Demo, error) {
-	demo, err := b.demoRepo.GetByID(id)
+// GetByID 获取单条记录；不存在时返回 ErrDemoNotFound。
+func (b *DemoBiz) GetByID(ctx context.Context, id uint) (*Demo, error) {
+	demo, err := b.repo.GetByID(ctx, id)
 	if err != nil {
-		b.logger.Error("获取 Demo 失败", "error", err, "id", id)
+		b.logger.ErrorContext(ctx, "获取 Demo 失败", "error", err, "id", id)
 		return nil, err
 	}
 	return demo, nil
 }
 
-// List 获取列表
-func (b *DemoBiz) List(page, pageSize int) ([]*data.Demo, int64, error) {
-	return b.demoRepo.List(page, pageSize)
+// List 分页获取记录。
+func (b *DemoBiz) List(ctx context.Context, page, pageSize int) ([]*Demo, int64, error) {
+	return b.repo.List(ctx, page, pageSize)
 }
 
-// Update 更新记录
-func (b *DemoBiz) Update(id uint, name, description string) (*data.Demo, error) {
-	demo, err := b.demoRepo.GetByID(id)
+// Update 更新记录：先取出领域模型，改字段后再交给仓储持久化。
+func (b *DemoBiz) Update(ctx context.Context, id uint, name, description string) (*Demo, error) {
+	demo, err := b.repo.GetByID(ctx, id)
 	if err != nil {
-		b.logger.Error("获取 Demo 失败", "error", err, "id", id)
+		b.logger.ErrorContext(ctx, "获取 Demo 失败", "error", err, "id", id)
 		return nil, err
 	}
+
 	demo.Name = name
 	demo.Description = description
-	err = b.demoRepo.Update(demo)
-	if err != nil {
-		b.logger.Error("更新 Demo 失败", "error", err)
+	if err := b.repo.Update(ctx, demo); err != nil {
+		b.logger.ErrorContext(ctx, "更新 Demo 失败", "error", err, "id", id)
 		return nil, err
 	}
 	return demo, nil
 }
 
-// Delete 删除记录
-func (b *DemoBiz) Delete(id uint) error {
-	return b.demoRepo.Delete(id)
+// Delete 删除记录。
+func (b *DemoBiz) Delete(ctx context.Context, id uint) error {
+	return b.repo.Delete(ctx, id)
 }
