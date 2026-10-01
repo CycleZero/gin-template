@@ -1,6 +1,6 @@
 BINARY_NAME := app
 BINARY_PATH := ./bin/${BINARY_NAME}
-MAIN_FILE_DIR := ./
+MAIN_FILE_DIR := ./cmd/main
 
 # wire 依赖注入代码生成（go run 使用 go.mod 锁定的 wire 版本，无需预装 wire 二进制）
 wire:
@@ -19,7 +19,7 @@ build-linux:
 
 # 运行
 run:
-	go run .
+	go run ${MAIN_FILE_DIR}
 
 # 安装依赖
 tidy:

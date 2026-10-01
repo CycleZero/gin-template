@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"gin-template/pkg/infra"

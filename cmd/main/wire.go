@@ -13,9 +13,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-func initApp(vc *viper.Viper, logger *slog.Logger) *MainApp {
+func initApp(vc *viper.Viper, logger *slog.Logger) *internal.MainApp {
 	panic(wire.Build(
-		NewMainApp,
+		internal.NewMainApp,
 		infra.ProviderSet,
 		internal.ProviderSet,
 	))

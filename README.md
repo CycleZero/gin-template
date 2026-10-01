@@ -19,9 +19,10 @@
 
 ```
 gin-template/
-├── main.go                     # 程序入口
-├── app.go                      # 应用封装（Gin Engine）
-├── wire.go / wire_gen.go       # Wire 依赖注入
+├── cmd/
+│   └── main/                   # 程序入口（package main）
+│       ├── main.go             # 启动、信号处理
+│       └── wire.go / wire_gen.go  # Wire 依赖注入
 ├── makefile                    # 构建命令
 ├── config.yaml.example         # 配置文件示例
 │
@@ -39,6 +40,7 @@ gin-template/
 │   └── demo.go                 # 示例模型
 │
 ├── internal/                   # 内部模块
+│   ├── app.go                  # 应用封装（Gin Engine，package internal）
 │   ├── provider.go             # 内部 Wire 聚合
 │   ├── common/                 # 公共组件
 │   │   └── request_meta.go     # 请求元数据
