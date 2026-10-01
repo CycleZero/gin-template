@@ -1,7 +1,10 @@
 // Package conf 基于 Kratos v3 的 config 组件加载配置。
 //
 // 配置结构由 internal/conf/conf.proto 定义，经 buf 生成为 conf.pb.go
-// （make config），本文件只放加载流程与手写方法（DSN/Addr/Validate）。
+// （make config）；本文件只放加载流程与手写方法（DSN/Addr/Validate）。
+//
+// 本包不保存任何全局配置：Load 读取并校验后返回 conf.Bootstrap，
+// 由调用方显式注入到各构造函数（项目内通过 Wire 完成）。
 //
 // 加载顺序即优先级（后加载的 source 覆盖先加载的）：
 //
@@ -15,9 +18,12 @@
 //	  db:
 //	    host: ${DB_HOST:localhost}   # APP_DB_HOST=127.0.0.1 即可覆盖
 //
-// 需要接配置中心时，只需在 config.WithSource 里追加对应 source
+// 注意：env source 产出的 key 是「去掉前缀后的那一层」，不含嵌套路径，
+// 因此只有写成占位符的字段才能被环境变量覆盖。
+//
+// 需要接配置中心时，在 config.WithSource 里追加对应 source
 // （如 github.com/go-kratos/kratos/contrib/config/etcd/v3），
-// 再用 Watch 注册热更新回调，调用方代码无需改动。
+// 再用返回的 Source.Watch 注册热更新回调。
 package conf
 
 import (
@@ -25,7 +31,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"sync"
 
 	"github.com/go-kratos/kratos/v3/config"
 	"github.com/go-kratos/kratos/v3/config/env"
@@ -89,16 +94,49 @@ func (x *Bootstrap) Validate() error {
 	return nil
 }
 
-var (
-	mu     sync.Mutex // 保护 globalConfig / kratosConfig
-	loadMu sync.Mutex // 串行化加载过程（load 不持有 mu，避免自死锁）
+// Source 是一次配置加载的来源句柄（底层 Kratos config 实例）。
+//
+// 进程退出前必须 Close 以停止各 source 的 watcher；需要热更新时用 Watch
+// 注册回调。它不持有配置数据本身，配置数据由 Load 单独返回。
+type Source struct {
+	c config.Config
+}
 
-	globalConfig *Bootstrap
-	kratosConfig config.Config // 保留句柄以便 Watch / Close
-)
+// Watch 为某个 key 注册热更新回调（key 为点分路径，如 data.db）。
+//
+// file / env source 自带 watcher，配置中心（etcd 等）接入后同样生效。
+// 回调中必须自行校验，并以原子方式替换可变状态；监听地址、驱动等
+// 启动期配置不应依赖热更新。
+func (s *Source) Watch(key string, o config.Observer) error {
+	if s == nil || s.c == nil {
+		return errors.New("conf: 配置来源未初始化")
+	}
+	return s.c.Watch(key, o)
+}
 
-// load 真正执行加载，不读写全局状态。
-func load(path string) (config.Config, *Bootstrap, error) {
+// Close 停止所有 source 的 watcher，进程退出前调用一次即可。
+func (s *Source) Close() error {
+	if s == nil || s.c == nil {
+		return nil
+	}
+	return s.c.Close()
+}
+
+// Load 读取配置、解码为 conf.Bootstrap 并校验，返回配置数据与来源句柄。
+//
+// 调用方负责在退出前关闭句柄（释放 watcher）：
+//
+//	cfg, src, err := conf.Load(path)
+//	if err != nil {
+//		return err
+//	}
+//	defer src.Close()
+func Load(paths ...string) (*Bootstrap, *Source, error) {
+	path := DefaultPath
+	if len(paths) > 0 && paths[0] != "" {
+		path = paths[0]
+	}
+
 	c := config.New(
 		config.WithSource(
 			file.NewSource(path),     // 默认值：版本库中的配置文件
@@ -122,103 +160,5 @@ func load(path string) (config.Config, *Bootstrap, error) {
 		_ = c.Close()
 		return nil, nil, err
 	}
-	return c, out, nil
-}
-
-// Load 加载配置并解码为 conf.Bootstrap（默认路径 DefaultPath）。
-//
-// 加载成功后会把内部 config 句柄记录为全局句柄，以便 Close 释放 watcher；
-// 返回的 *Bootstrap 与全局配置相互独立。
-func Load(paths ...string) (*Bootstrap, error) {
-	path := DefaultPath
-	if len(paths) > 0 && paths[0] != "" {
-		path = paths[0]
-	}
-
-	c, out, err := load(path)
-	if err != nil {
-		return nil, err
-	}
-
-	mu.Lock()
-	kratosConfig = c
-	mu.Unlock()
-	return out, nil
-}
-
-// GetConfig 返回全局配置单例（首次调用时按 DefaultPath 加载）。
-// 加载失败属于启动期致命错误，直接终止进程。
-func GetConfig(paths ...string) *Bootstrap {
-	mu.Lock()
-	if globalConfig != nil {
-		out := globalConfig
-		mu.Unlock()
-		return out
-	}
-	mu.Unlock()
-
-	loadMu.Lock()
-	defer loadMu.Unlock()
-
-	// 双重检查：等待加载锁期间可能已被其他 goroutine 初始化
-	mu.Lock()
-	if globalConfig != nil {
-		out := globalConfig
-		mu.Unlock()
-		return out
-	}
-	mu.Unlock()
-
-	path := DefaultPath
-	if len(paths) > 0 && paths[0] != "" {
-		path = paths[0]
-	}
-
-	c, out, err := load(path)
-	if err != nil {
-		fmt.Println("致命错误:", err)
-		panic("致命错误: " + err.Error())
-	}
-
-	mu.Lock()
-	globalConfig = out
-	kratosConfig = c
-	mu.Unlock()
-	return out
-}
-
-// SetConfig 覆盖全局配置，便于测试注入。
-func SetConfig(c *Bootstrap) {
-	mu.Lock()
-	globalConfig = c
-	mu.Unlock()
-}
-
-// Watch 为某个 key 注册热更新回调（key 为点分路径，如 data.db）。
-//
-// file / env source 自带 watcher，配置中心（etcd 等）接入后同样生效。
-// 回调中必须自行校验，并以原子方式替换可变状态；监听地址、驱动等
-// 启动期配置不应依赖热更新。
-func Watch(key string, o config.Observer) error {
-	mu.Lock()
-	c := kratosConfig
-	mu.Unlock()
-
-	if c == nil {
-		return errors.New("conf: 配置尚未加载，请先调用 Load 或 GetConfig")
-	}
-	return c.Watch(key, o)
-}
-
-// Close 停止所有 source 的 watcher，进程退出前调用一次即可。
-func Close() error {
-	mu.Lock()
-	c := kratosConfig
-	kratosConfig = nil
-	mu.Unlock()
-
-	if c == nil {
-		return nil
-	}
-	return c.Close()
+	return out, &Source{c: c}, nil
 }

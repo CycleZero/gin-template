@@ -58,11 +58,11 @@ func writeConfig(t *testing.T, body string) string {
 }
 
 func TestLoadPlaceholderDefaults(t *testing.T) {
-	cfg, err := Load(writeConfig(t, sampleConfig))
+	cfg, src, err := Load(writeConfig(t, sampleConfig))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	defer func() { _ = Close() }()
+	defer func() { _ = src.Close() }()
 
 	if got, want := cfg.GetData().GetDb().DSN(),
 		"root:secret@tcp(localhost:3306)/gin_template?charset=utf8mb4&parseTime=True&loc=Local"; got != want {
@@ -90,11 +90,11 @@ func TestLoadEnvOverride(t *testing.T) {
 	t.Setenv("APP_LOG_MODE", "prod")
 	t.Setenv("APP_DEV_MODE", "false")
 
-	cfg, err := Load(writeConfig(t, sampleConfig))
+	cfg, src, err := Load(writeConfig(t, sampleConfig))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	defer func() { _ = Close() }()
+	defer func() { _ = src.Close() }()
 
 	if got, want := cfg.GetData().GetDb().DSN(),
 		"root:s3cr3t@tcp(10.0.0.12:3400)/gin_template?charset=utf8mb4&parseTime=True&loc=Local"; got != want {
@@ -114,17 +114,41 @@ func TestLoadEnvOverride(t *testing.T) {
 func TestLoadRejectsInvalidMode(t *testing.T) {
 	t.Setenv("APP_LOG_MODE", "staging")
 
-	_, err := Load(writeConfig(t, sampleConfig))
-	if err == nil {
+	if _, _, err := Load(writeConfig(t, sampleConfig)); err == nil {
 		t.Fatal("Load 应当因 log.mode 非法而失败")
-	}
-	if !strings.Contains(err.Error(), "log.mode") {
+	} else if !strings.Contains(err.Error(), "log.mode") {
 		t.Errorf("错误信息应指明 log.mode，实际为: %v", err)
 	}
 }
 
 func TestLoadMissingFile(t *testing.T) {
-	if _, err := Load(filepath.Join(t.TempDir(), "not-exist.yaml")); err == nil {
+	if _, _, err := Load(filepath.Join(t.TempDir(), "not-exist.yaml")); err == nil {
 		t.Fatal("配置文件不存在时应当返回错误")
+	}
+}
+
+// TestLoadNoGlobalState 确保两次加载互不影响（本包不保存全局配置）。
+func TestLoadNoGlobalState(t *testing.T) {
+	first, srcA, err := Load(writeConfig(t, sampleConfig))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = srcA.Close() }()
+
+	t.Setenv("APP_DB_HOST", "10.0.0.99")
+	second, srcB, err := Load(writeConfig(t, sampleConfig))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	defer func() { _ = srcB.Close() }()
+
+	if first == second {
+		t.Fatal("两次加载应返回彼此独立的实例")
+	}
+	if got := first.GetData().GetDb().GetHost(); got != "localhost" {
+		t.Errorf("前一次加载被后一次影响: host = %q, want localhost", got)
+	}
+	if got := second.GetData().GetDb().GetHost(); got != "10.0.0.99" {
+		t.Errorf("后一次加载未生效: host = %q, want 10.0.0.99", got)
 	}
 }

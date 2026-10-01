@@ -9,9 +9,9 @@
 //	slog.Info("服务已启动", "addr", addr)
 //	slog.Error("连接数据库失败", "error", err)
 //
-// GetLogger 会把构建出的 Logger 注册为 slog 默认 Logger，因此任意包内直接
-// 调用 slog.Info / slog.Error 即可；需要显式注入或替换时（例如测试）
-// 使用 GetLogger() 返回的 *slog.Logger（项目内 biz/service 通过 Wire 注入）。
+// 本包不保存全局 Logger：入口处用 NewLogger 构建，并交给 slog.SetDefault，
+// 之后包级 slog.Info / slog.Error 与显式注入的 *slog.Logger 使用同一后端
+// （项目内 biz/service 由 Wire 注入）。
 package log
 
 import (
@@ -47,12 +47,8 @@ var (
 )
 
 var (
-	// newMu 保护 globalLogger 的懒加载。sync.Mutex 不可重入，
-	// 因此 GetLogger 持锁期间调用的 NewLogger 只能使用 writerMu。
-	newMu sync.Mutex
-	// writerMu 保护异步文件写入器列表
+	// writerMu 保护异步文件写入器列表（供 Close 统一 flush）
 	writerMu     sync.Mutex
-	globalLogger *slog.Logger
 	asyncWriters []*law.WriteAsyncer
 )
 
@@ -208,34 +204,6 @@ func customLevelColorEncoder(level zapcore.Level, enc zapcore.PrimitiveArrayEnco
 
 func customTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(color.New(color.FgCyan).SprintFunc()(t.Format("2006-01-02 15:04:05.000")))
-}
-
-// GetLogger 返回全局 slog.Logger（懒加载）并注册为 slog 默认 Logger。
-//
-// 注册后业务包可直接使用 slog.Info / slog.Error 等包级函数。
-func GetLogger() *slog.Logger {
-	newMu.Lock()
-	defer newMu.Unlock()
-
-	if globalLogger == nil {
-		logger, err := NewLogger(conf.GetConfig())
-		if err != nil {
-			fmt.Println("致命错误: 创建logger失败，触发panic", err)
-			panic("致命错误: 创建logger失败, 触发panic" + err.Error())
-		}
-		globalLogger = logger
-		slog.SetDefault(logger)
-	}
-	return globalLogger
-}
-
-// SetGlobalLogger 覆盖全局 Logger，并同步为 slog 默认 Logger（便于测试替换）。
-func SetGlobalLogger(l *slog.Logger) {
-	newMu.Lock()
-	globalLogger = l
-	newMu.Unlock()
-
-	slog.SetDefault(l)
 }
 
 // Close 停止异步文件写入器并 flush 缓冲，进程退出前调用一次即可。

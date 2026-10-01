@@ -89,10 +89,10 @@ slog.Info("创建成功", "id", id, "user_id", uid)
 slog.Error("查询失败", "error", err)
 ```
 
-- `log.GetLogger()` 构建后端并注册为 slog 默认 Logger（`slog.SetDefault`），
-  因此任意包内直接调用 `slog.Info` / `slog.Error` 等包级函数即可，无需层层传递。
-- 需要显式注入或替换时使用 `*slog.Logger`：`biz.go` / `service.go` 由 Wire 注入，
-  测试时可通过 `log.SetGlobalLogger` 或注入自定义 handler 替换。
+- `log.NewLogger(cfg)` 在入口处构建后端，`main` 调用 `slog.SetDefault` 注册为默认
+  Logger，因此任意包内直接调用 `slog.Info` / `slog.Error` 等包级函数即可。
+- 需要显式注入时使用 `*slog.Logger`：`biz.go` / `service.go` 由 Wire 注入；
+  本包不保存全局 Logger，测试时可直接向构造函数传入自定义 `*slog.Logger`。
 - 初始化阶段的致命错误使用 `log.Fatal(...)`：它先 flush 再 `os.Exit(1)`
   （`os.Exit` 不会执行 defer，直接用 os.Exit 会丢掉文件日志）。
 - 进程退出前 `main` 中的 `defer log.Close()` 会停止异步写入器并 flush；
@@ -154,6 +154,22 @@ make run
 1. **file source**：`config.yaml`（默认值，随版本库管理）
 2. **env source**：`APP_` 前缀环境变量（部署覆盖）
 
+本包**不保存全局配置**：`conf.Load` 读取并校验后返回 `*conf.Bootstrap` 与来源句柄，
+由入口显式注入到各构造函数（项目内通过 Wire 完成），测试时可直接构造替换：
+
+```go
+cfg, src, err := conf.Load(*confPath) // src 用于 Close / Watch
+if err != nil {
+    fmt.Fprintln(os.Stderr, "启动失败:", err)
+    os.Exit(1)
+}
+defer src.Close()
+
+logger, err := log.NewLogger(cfg)
+slog.SetDefault(logger)
+app := initApp(cfg, logger) // cfg 一路随构造函数显式传递
+```
+
 配置文件里的 `${KEY:default}` 占位符会从「合并后的配置」解析，因此嵌套项也能被
 环境变量覆盖，密钥无需写进文件：
 
@@ -206,9 +222,9 @@ go run ./cmd/main -conf /etc/myapp/config.yaml
 
 **扩展配置中心**：接入 etcd 等远程配置源时，只需在 [internal/conf/config.go](internal/conf/config.go)
 的 `config.WithSource(...)` 中追加对应 source（如 `contrib/config/etcd/v3`），
-再用 `conf.Watch(key, observer)` 注册热更新回调，业务代码无需改动。
-注意 `conf.Close()` 必须在进程退出前调用以释放 watcher（[cmd/main/main.go](cmd/main/main.go)
-已通过 defer 处理）。
+再用 `Load` 返回的 `*conf.Source` 注册热更新回调（`src.Watch(key, observer)`），
+业务代码无需改动。`src.Close()` 必须在进程退出前调用以释放 watcher
+（[cmd/main/main.go](cmd/main/main.go) 已通过 defer 处理）。
 
 ## API 文档
 
